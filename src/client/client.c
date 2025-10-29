@@ -1,8 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <libc.h>
+#include <string.h>
+#include <stdint.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <unistd.h>
 #include "client.h"
 
@@ -20,6 +22,12 @@ int start_client() {
         perror("socket failed");
         exit(EXIT_FAILURE);
     }
+
+
+    char username[USERNAME_SIZE + 1];
+    printf("Enter username: ");
+    fgets(username, USERNAME_SIZE + 1, stdin);
+    username[strcspn(username, "\n")] = 0; // Remove newline character
 
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(PORT);
@@ -45,7 +53,6 @@ int start_client() {
         }
 
         // Send username
-        char username[USERNAME_SIZE + 1] = "test_user";
         if (send(client_fd, username, USERNAME_SIZE + 1, 0) <= 0) {
             perror("send failed");
             exit(EXIT_FAILURE);

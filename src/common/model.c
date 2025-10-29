@@ -55,13 +55,15 @@ void printGame(Game *game, int player) {
 }
 
 User newUser(char const *username, char *bio) {
-    return (User){
-        .username = {*username},
-        .bio = bio,
-        .total_score = 0,
-        .total_games = 0,
-        .total_wins = 0
-    };
+    User user;
+    strncpy(user.username, username, sizeof(user.username));
+
+    user.bio = bio;
+    user.total_score = 0;
+    user.total_games = 0;
+    user.total_wins = 0;
+
+    return user;
 }
 
 Player newPlayer(User *user) {
