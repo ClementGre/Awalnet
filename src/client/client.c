@@ -44,39 +44,94 @@ int start_client() {
         exit(EXIT_FAILURE);
     }
 
+    int connect_call_type_send = 0;
+    User user;
+
     while (1) {
-        // Send CONNECT call type
-        CallType call_type = CONNECT;
-        if (send(client_fd, &call_type, sizeof(CallType), 0) <= 0) {
-            perror("send failed");
-            exit(EXIT_FAILURE);
+
+        if (!connect_call_type_send) {
+            // Send CONNECT call type
+            CallType call_type = CONNECT;
+            if (send(client_fd, &call_type, sizeof(CallType), 0) <= 0) {
+                perror("send failed");
+                exit(EXIT_FAILURE);
+            }
+            connect_call_type_send = 1;
+
+            // Send username
+            if (send(client_fd, username, USERNAME_SIZE + 1, 0) <= 0) {
+                perror("send failed");
+                exit(EXIT_FAILURE);
+            }
+
+            // Receive User struct
+            uint8_t buffer[1024];
+            if (recv(client_fd, buffer, 1024, 0) <= 0) {
+                perror("recv failed");
+                exit(EXIT_FAILURE);
+            }
+
+            // Deserialize User struct
+            deserialize_User(buffer, &user);
+
+            // Print received User struct
+            printf("Received User struct: username = %s, id = %d, bio = %s, total_score = %d, total_games = %d, total_wins = %d\n",
+                   user.username, user.id, user.bio, user.total_score, user.total_games, user.total_wins);
+
         }
 
-        // Send username
-        if (send(client_fd, username, USERNAME_SIZE + 1, 0) <= 0) {
-            perror("send failed");
-            exit(EXIT_FAILURE);
+        // set of actions to perform
+        printf("\n===== MENU =====\n");
+        printf(" 1 - View your profile\n");
+        printf(" 2 - Display online users\n");
+        printf(" 3 - Challenge a user\n");
+        printf(" 4 - Exit\n");
+
+        int choice;
+        printf("Enter your choice: ");
+
+        if (scanf("%d", &choice) != 1) {
+            printf("Invalid input. Please enter a number between 1 and 4.\n");
+            while (getchar() != '\n');
+            continue;
         }
 
-        // Receive User struct
-        uint8_t buffer[1024];
-        if (recv(client_fd, buffer, 1024, 0) <= 0) {
-            perror("recv failed");
-            exit(EXIT_FAILURE);
+        while (getchar() != '\n');
+
+        switch (choice) {
+            case 1:
+                // view profile
+                printUser(&user);
+                break;
+            case 2:
+                CallType call_type = LIST_USERS;
+                if (send(client_fd, &call_type, sizeof(CallType), 0) <= 0) {
+                    perror("send failed");
+                    exit(EXIT_FAILURE);
+                }
+
+                char user_list_buffer[1024] = {0};
+                if (recv(client_fd, user_list_buffer, sizeof(user_list_buffer), 0) <= 0) {
+                    perror("recv failed");
+                    exit(EXIT_FAILURE);
+                }
+
+                printf("Online users:\n%s", user_list_buffer);
+
+                break;
+            case 3:
+                printf("Challenge feature not implemented yet.\n");
+                break;
+            case 4:
+                close(client_fd);
+                printf("Disconnected from server.\n");
+                exit(EXIT_SUCCESS);
+            default:
+                printf("Invalid choice. Please enter a number between 1 and 4.\n");
+                break;
         }
 
-        // Deserialize User struct
-        User user;
-        deserialize_User(buffer, &user);
-
-        // Print received User struct
-        printf("Received User struct: username = %s, id = %d, bio = %s, total_score = %d, total_games = %d, total_wins = %d\n",
-               user.username, user.id, user.bio, user.total_score, user.total_games, user.total_wins);
-
-        // Free allocated memory
-        free(user.bio);
-
-        sleep(2);
+        sleep(1);
     }
 
     return 0;

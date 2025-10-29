@@ -18,6 +18,8 @@ int start_server() {
     int server_fd, client_fds[MAX_CLIENTS];
     struct sockaddr_in address;
     int addrlen = sizeof(address);
+    int online_users_count = 0;
+    int online_user_names[MAX_CLIENTS][USERNAME_SIZE + 1];
 
     // Initialize client_fds
     for (int i = 0; i < MAX_CLIENTS; i++) {
@@ -114,6 +116,9 @@ int start_server() {
                         }
                         // Process CONNECT command
                         User user = newUser(username, "");
+                        // Add to online users
+                        strcpy(online_user_names[online_users_count], username);
+                        online_users_count++;
                         uint8_t user_buffer[1024]; // Ensure buffer is large enough
                         serialize_User(&user, user_buffer);
                         send(client_fds[i], user_buffer, sizeof(user_buffer), 0);
@@ -129,6 +134,16 @@ int start_server() {
                             continue;
                         }
                         // Process CHALLENGE command
+                        break;
+                    }
+                    case LIST_USERS: {
+                        printf("Sending online users to client %d\n", i);
+                        char user_list_buffer[1024] = "";
+                        for (int u = 0; u < online_users_count; u++) {
+                            strcat(user_list_buffer, online_user_names[u]);
+                            strcat(user_list_buffer, "\n");
+                        }
+                        send(client_fds[i], user_list_buffer, strlen(user_list_buffer) + 1, 0);
                         break;
                     }
                     default:
