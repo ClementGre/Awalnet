@@ -160,7 +160,9 @@ int start_server() {
                     break;
                 }
                 case LIST_USERS: {
+                    CallType out = LIST_USERS;
                     char user_list_buffer[1024] = {0};
+                    int client_count = 0;
                     for (int u = 0; u < MAX_CLIENTS; u++) {
                         if (clients[u].active && clients[u].user_id != 0 && clients[u].fd != clients[i].fd) {
                             strcat(user_list_buffer, clients[u].username);
@@ -170,9 +172,14 @@ int start_server() {
                             strcat(user_list_buffer, id_str);
                             strcat(user_list_buffer, ")");
                             strcat(user_list_buffer, "\n");
+                            client_count++;
                         }
                     }
                     printf("Sending user list to %s (id=%d)\n", clients[i].username, clients[i].user_id);
+                    send(clients[i].fd, &out, sizeof(out), 0);
+                    if (client_count == 0) {
+                        strcat(user_list_buffer, "No other users online.\n");
+                    }
                     send(clients[i].fd, user_list_buffer, strlen(user_list_buffer) + 1, 0);
                     break;
                 }

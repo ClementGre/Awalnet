@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <pthread.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -11,6 +12,58 @@
 #include "../common/model.h"
 
 #define PORT 8080
+
+pthread_cond_t cond_challenge = PTHREAD_COND_INITIALIZER;
+pthread_cond_t cond_list_users = PTHREAD_COND_INITIALIZER;
+
+// declaring mutex
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+
+void *listen_server(void *arg) {
+    int client_fd = *(int *)arg;
+    CallType incoming;
+
+    while (1) {
+        ssize_t n = recv(client_fd, &incoming, sizeof(incoming), 0);
+        if (n <= 0) {
+            printf("Connexion au serveur perdue.\n");
+            exit(EXIT_FAILURE);
+        }
+
+        if (incoming == CHALLENGE) {
+            int challenger_id;
+            char challenger_username[USERNAME_SIZE + 1] = {0};
+            recv(client_fd, &challenger_id, sizeof(int), 0);
+            recv(client_fd, challenger_username, USERNAME_SIZE + 1, 0);
+            printf("\n>>> Défi reçu de %s (id=%d)\n", challenger_username, challenger_id);
+        }
+        else if (incoming == ERROR) {
+            char error_msg[256] = {0};
+            recv(client_fd, error_msg, sizeof(error_msg), 0);
+            printf(">>> Erreur : %s\n", error_msg);
+            pthread_cond_signal(&cond_challenge);
+
+        }
+        else if (incoming == SUCCESS) {
+            printf(">>> Votre demande de défi a été envoyé !\n");
+            pthread_cond_signal(&cond_challenge);
+        }
+        else if (incoming == LIST_USERS) {
+            char user_list_buffer[1024] = {0};
+            recv(client_fd, user_list_buffer, sizeof(user_list_buffer), 0);
+            printf("Utilisateurs en ligne :\n%s\n", user_list_buffer);
+            pthread_cond_signal(&cond_list_users);
+
+        }
+        else {
+            printf(">>> Message inconnu reçu du serveur.\n");
+        }
+
+        fflush(stdout);
+    }
+
+    return NULL;
+}
 
 int start_client() {
     int client_fd;
@@ -61,38 +114,11 @@ int start_client() {
     deserialize_User(buffer, &user);
     printf("Connecté en tant que %s (id=%d)\n", user.username, user.id);
 
+    pthread_t listener_thread;
+    pthread_create(&listener_thread, NULL, listen_server, &client_fd);
+
     while (1) {
-        // small delay to ensure we didn’t miss incoming messages
-        sleep(1);
-
-        // we have to listen for incoming challenges
-        // this is done using select to not block the main thread (menu)
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(client_fd, &rfds);
-        struct timeval tv = {0, 0};
-        int n = select(client_fd + 1, &rfds, NULL, NULL, &tv);
-        if (n > 0 && FD_ISSET(client_fd, &rfds)) {
-            CallType incoming;
-            if (recv(client_fd, &incoming, sizeof(incoming), 0) > 0) {
-                if (incoming == CHALLENGE) {
-                    int challenger_id = 0;
-                    char challenger_username[USERNAME_SIZE + 1] = {0};
-                    recv(client_fd, &challenger_id, sizeof(int), 0);
-                    recv(client_fd, challenger_username, USERNAME_SIZE + 1, 0);
-                    printf("\n>>> Défi reçu de %s (id=%d)\n", challenger_username, challenger_id);
-                }
-                if (incoming == ERROR){
-                    char error_msg[256] = {0};
-                    recv(client_fd, error_msg, sizeof(error_msg), 0);
-                    printf(">>> Error : %s\n", error_msg);
-                }
-                if (incoming == SUCCESS){
-                    printf(">>> Votre défi a été accepté !\n");
-                }
-            }
-        }
-
+        pthread_mutex_lock(&lock);
         printf("\n===== MENU =====\n");
         printf(" 1 - Voir votre profil\n");
         printf(" 2 - Afficher les utilisateurs en ligne\n");
@@ -103,50 +129,53 @@ int start_client() {
         int choice;
         if (scanf("%d", &choice) != 1) {
             printf("Entrée invalide.\n");
-            while (getchar()!='\n');
+            while (getchar() != '\n');
             continue;
         }
-        // we need to clear the input buffer to avoid issues with fgets later
-        while (getchar()!='\n');
+        while (getchar() != '\n'); // vider buffer
 
         if (choice == 1) {
             printUser(&user);
-        } else if (choice == 2) {
+        }
+        else if (choice == 2) {
             CallType ct = LIST_USERS;
             if (send(client_fd, &ct, sizeof(ct), 0) <= 0) {
                 perror("send failed");
                 exit(EXIT_FAILURE);
             }
-            char user_list_buffer[1024] = {0};
-            if (recv(client_fd, user_list_buffer, sizeof(user_list_buffer), 0) <= 0) {
-                perror("recv failed");
-                exit(EXIT_FAILURE);
-            }
-            printf("Utilisateurs en ligne:\n%s", user_list_buffer);
-        } else if (choice == 3) {
-            int opponent_id = 0;
+            pthread_cond_wait(&cond_list_users, &lock);
+        }
+        else if (choice == 3) {
+            int opponent_id;
             printf("Entrer l'id de l'adversaire: ");
             if (scanf("%d", &opponent_id) != 1) {
                 printf("Entrée invalide.\n");
-                while (getchar()!='\n');
+                while (getchar() != '\n');
                 continue;
             }
-            while (getchar()!='\n');
+            while (getchar() != '\n');
             CallType ct = CHALLENGE;
             if (send(client_fd, &ct, sizeof(ct), 0) <= 0) {
-                perror("send failed"); exit(EXIT_FAILURE);
+                perror("send failed");
+                exit(EXIT_FAILURE);
             }
             if (send(client_fd, &opponent_id, sizeof(int), 0) <= 0) {
                 perror("send failed");
                 exit(EXIT_FAILURE);
             }
-        } else if (choice == 5) {
+            pthread_cond_wait(&cond_challenge, &lock);
+        }
+
+        else if (choice == 5) {
             close(client_fd);
             printf("Déconnecté.\n");
             exit(EXIT_SUCCESS);
-        } else {
+        }
+        else {
             printf("Choix invalide.\n");
         }
+        pthread_mutex_unlock(&lock);
     }
+
     return 0;
 }
