@@ -14,10 +14,14 @@
 #define PORT 8080
 
 pthread_cond_t cond_challenge = PTHREAD_COND_INITIALIZER;
+pthread_cond_t cond_user_profile = PTHREAD_COND_INITIALIZER;
 pthread_cond_t cond_list_users = PTHREAD_COND_INITIALIZER;
 
 // declaring mutex
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+
+User user;
+
 
 void *listen_server(void *arg) {
     int client_fd = *(int *)arg;
@@ -42,6 +46,8 @@ void *listen_server(void *arg) {
             recv(client_fd, error_msg, sizeof(error_msg), 0);
             printf(">>> Erreur : %s\n", error_msg);
             pthread_cond_signal(&cond_challenge);
+            pthread_cond_signal(&cond_user_profile);
+
 
         }
         else if (incoming == SUCCESS) {
@@ -55,9 +61,45 @@ void *listen_server(void *arg) {
             pthread_cond_signal(&cond_list_users);
 
         }
+        else if (incoming == CONSULT_USER_PROFILE){
+            CallType ct = SENT_USER_PROFILE;
+            int request_user_id;
+            recv(client_fd, &request_user_id, sizeof(int), 0);
+            if (send(client_fd, &ct, sizeof(ct), 0) <= 0) {
+                perror("calltype send failed");
+                exit(EXIT_FAILURE);
+            }
+            if (send(client_fd, &request_user_id, sizeof(int), 0) <= 0) {
+                perror("request_user_id send failed");
+                exit(EXIT_FAILURE);
+            }
+            uint8_t user_buffer[1024] = {0};
+            serialize_User(&user, user_buffer);
+
+            if (send(client_fd, &user_buffer, sizeof(user_buffer), 0) <= 0) {
+                perror("user profile send failed");
+                exit(EXIT_FAILURE);
+            }
+
+        }
+        else if (incoming == RECEIVE_USER_PROFILE){
+            uint8_t buffer[1024] = {0};
+            if (recv(client_fd, buffer, sizeof(buffer), 0) <= 0) {
+                perror("recv failed");
+                exit(EXIT_FAILURE);
+            }
+            User user_received;
+            deserialize_User(buffer, &user_received);
+            printf("Profile de l'utilisateur demandé :\n");
+            printUser(&user_received);
+            pthread_cond_signal(&cond_user_profile);
+
+
+        }
         else {
             printf(">>> Message inconnu reçu du serveur.\n");
         }
+
 
         fflush(stdout);
     }
@@ -105,7 +147,6 @@ int start_client() {
     }
 
     // Receive User info
-    User user;
     uint8_t buffer[1024] = {0};
     if (recv(client_fd, buffer, sizeof(buffer), 0) <= 0) {
         perror("recv failed");
@@ -123,6 +164,7 @@ int start_client() {
         printf(" 1 - Voir votre profil\n");
         printf(" 2 - Afficher les utilisateurs en ligne\n");
         printf(" 3 - Défier un utilisateur\n");
+        printf(" 4 - Consulter le profil d'un utilisateur\n");
         printf(" 5 - Quitter\n");
         printf("Votre choix: ");
 
@@ -164,6 +206,26 @@ int start_client() {
                 exit(EXIT_FAILURE);
             }
             pthread_cond_wait(&cond_challenge, &lock);
+        }
+        else if (choice == 4) {
+            int user_profile_id;
+            printf("Entrer l'id du joueur: ");
+            if (scanf("%d", &user_profile_id) != 1) {
+                printf("Entrée invalide.\n");
+                while (getchar() != '\n');
+                continue;
+            }
+            while (getchar() != '\n');
+            CallType ct = CONSULT_USER_PROFILE;
+            if (send(client_fd, &ct, sizeof(ct), 0) <= 0) {
+                perror("send failed");
+                exit(EXIT_FAILURE);
+            }
+            if (send(client_fd, &user_profile_id, sizeof(int), 0) <= 0) {
+                perror("send failed");
+                exit(EXIT_FAILURE);
+            }
+            pthread_cond_wait(&cond_user_profile, &lock);
         }
 
         else if (choice == 5) {

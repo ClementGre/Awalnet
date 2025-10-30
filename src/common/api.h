@@ -11,7 +11,10 @@ typedef enum CallType {
     CHALLENGE = 4, // Request opponent_user_id
     CONSULT_USER_PROFILE = 5, // Request user_id
     ERROR = 6, // Notify client that an error occurred (for now message to explain why a challenge failed)
-    SUCCESS = 7 // Notify client that the previous call was successful (for now used after a challenge is accepted)
+    SUCCESS = 7, // Notify client that the previous call was successful (for now used after a challenge is accepted)
+    SENT_USER_PROFILE = 8, // Answer to CONSULT_USER_PROFILE -> send the user profile to the server
+    RECEIVE_USER_PROFILE = 9
+
 } CallType;
 
 

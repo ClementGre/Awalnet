@@ -141,7 +141,8 @@ int start_server() {
                     for (int j = 0; j < MAX_CLIENTS; j++) {
                         if (clients[j].active && clients[j].user_id == opponent_user_id) {
                             target = j;
-                            break; }
+                            break;
+                        }
                     }
                     if (target != -1) {
                         CallType out = CHALLENGE;
@@ -181,6 +182,71 @@ int start_server() {
                         strcat(user_list_buffer, "No other users online.\n");
                     }
                     send(clients[i].fd, user_list_buffer, strlen(user_list_buffer) + 1, 0);
+                    break;
+                }
+                case CONSULT_USER_PROFILE: {
+                    CallType out = CONSULT_USER_PROFILE;
+                    CallType error = ERROR;
+                    int requested_user_id = 0;
+                    if (read(clients[i].fd, &requested_user_id, sizeof(int)) <= 0) {
+                        close(clients[i].fd); clients[i].active = 0; break;
+                    }
+                    if(requested_user_id == clients[i].user_id) {
+                        printf("User %s (id=%d) attempted to request their own profile. Ignored.\n",
+                               clients[i].username, clients[i].user_id);
+                        char error_msg[] = "To view your own profile, press 1.";
+                        send(clients[i].fd, &error, sizeof(error), 0);
+                        send(clients[i].fd, error_msg, sizeof(error_msg), 0);
+                        break;
+                    }
+                    // Find target client by user_id and send them the request to send their profile
+                    int target = -1;
+                    for (int j = 0; j < MAX_CLIENTS; j++) {
+                        if (clients[j].active && clients[j].user_id == requested_user_id) {
+                            target = j;
+                            break;
+                        }
+                    }
+                    if (target != -1) {
+                        send(clients[target].fd, &out, sizeof(out), 0);
+                        send(clients[target].fd, &clients[i].user_id, sizeof(int), 0);
+                        printf("Request profile initialized by de %s(id=%d) to %s(id=%d) | socket %d to bind\n",
+                               clients[i].username, clients[i].user_id, clients[target].username, clients[target].user_id, clients[target].fd);
+                    } else {
+                        printf("Utilisateur %d introuvable -> on ne peut pas afficher son profile.\n", requested_user_id);
+                        char error_msg[] = "User not found or not online.";
+                        send(clients[i].fd, &error, sizeof(error), 0);
+                        send(clients[i].fd, error_msg, sizeof(error_msg), 0);
+                    }
+                    break;
+                }
+                case SENT_USER_PROFILE:{
+                    CallType out = RECEIVE_USER_PROFILE;
+                    int request_user_id;
+                    if (recv(clients[i].fd, &request_user_id, sizeof (int), 0) <= 0) {
+                        close(clients[i].fd);
+                        clients[i].active = 0;
+                        break;
+                    }
+                    // we get the user_profile serialized
+                    uint8_t buffer[1024] = {0};
+                    if (recv(clients[i].fd,  buffer, sizeof(buffer), 0) <= 0) {
+                        perror("recv failed");
+                        exit(EXIT_FAILURE);
+                    }
+
+
+                    // and then send it to the request_user_id
+                    int target = -1;
+                    for (int j = 0; j < MAX_CLIENTS; j++) {
+                        if (clients[j].active && clients[j].user_id == request_user_id) {
+                            target = j;
+                            break;
+                        }
+                    }
+                    printf("Sending %s's profile to %s\n", clients[i].username, clients[target].username);
+                    send(clients[target].fd, &out, sizeof(out), 0);
+                    send(clients[target].fd, buffer, sizeof(buffer), 0);
                     break;
                 }
                 default: break;

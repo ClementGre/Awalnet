@@ -61,7 +61,7 @@ User newUser(char const *username, char *bio) {
     user.id = rand() % 100000;
     user.bio = bio;
     user.total_score = 0;
-    user.total_games = 0;
+    user.total_games = rand() % 100;
     user.total_wins = 0;
 
     return user;
