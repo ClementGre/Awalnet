@@ -9,6 +9,9 @@ typedef enum CallType {
     LIST_GAMES = 2,
     LIST_CHALLENGES = 3,
     CHALLENGE = 4, // Request opponent_user_id
+    CONSULT_USER_PROFILE = 5, // Request user_id
+    ERROR = 6, // Notify client that an error occurred (for now message to explain why a challenge failed)
+    SUCCESS = 7 // Notify client that the previous call was successful (for now used after a challenge is accepted)
 } CallType;
 
 

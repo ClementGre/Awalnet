@@ -57,7 +57,8 @@ void printGame(Game *game, int player) {
 User newUser(char const *username, char *bio) {
     User user;
     strncpy(user.username, username, sizeof(user.username));
-
+    srand( time( NULL ) );
+    user.id = rand() % 100000;
     user.bio = bio;
     user.total_score = 0;
     user.total_games = 0;

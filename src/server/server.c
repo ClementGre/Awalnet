@@ -7,26 +7,29 @@
 #include <unistd.h>
 #include "../common/api.h"
 
-// Define constants
 #define PORT 8080
 #define MAX_CLIENTS 10
 #define USERNAME_SIZE 32
 
+typedef struct {
+    int fd;
+    int user_id;
+    char username[USERNAME_SIZE + 1];
+    int active;
+} Client;
+
 
 int start_server() {
     printf("🚀 Starting Awalnet server...\n");
-    int server_fd, client_fds[MAX_CLIENTS];
+    int server_fd;
     struct sockaddr_in address;
     int addrlen = sizeof(address);
-    int online_users_count = 0;
-    int online_user_names[MAX_CLIENTS][USERNAME_SIZE + 1];
 
-    // Initialize client_fds
+    Client clients[MAX_CLIENTS];
     for (int i = 0; i < MAX_CLIENTS; i++) {
-        client_fds[i] = 0;
+        clients[i].active = 0;
     }
 
-    // Create server socket
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
         perror("socket failed");
         exit(EXIT_FAILURE);
@@ -36,13 +39,12 @@ int start_server() {
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(PORT);
 
-    // Bind the socket to the port
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
         perror("bind failed");
         exit(EXIT_FAILURE);
+
     }
 
-    // Listen for incoming connections
     if (listen(server_fd, 3) < 0) {
         perror("listen failed");
         exit(EXIT_FAILURE);
@@ -50,7 +52,7 @@ int start_server() {
 
     fd_set read_fds;
     struct timeval timeout;
-    timeout.tv_sec = 1; // 1-second timeout
+    timeout.tv_sec = 1;
     timeout.tv_usec = 0;
 
     printf("✨ Server listening on port %d\n", PORT);
@@ -60,99 +62,123 @@ int start_server() {
         int max_fd = server_fd;
 
         for (int i = 0; i < MAX_CLIENTS; i++) {
-            if (client_fds[i] > 0) {
-                FD_SET(client_fds[i], &read_fds);
-            }
-            if (client_fds[i] > max_fd) {
-                max_fd = client_fds[i];
+            if (clients[i].active) {
+                FD_SET(clients[i].fd, &read_fds);
+                if (clients[i].fd > max_fd) max_fd = clients[i].fd;
             }
         }
+
 
         int activity = select(max_fd + 1, &read_fds, NULL, NULL, &timeout);
         if (activity < 0) {
             perror("select failed");
             continue;
-        } else if (activity == 0) {
-            // Timeout occurred, continue to next iteration
+        }
+        else if (activity == 0) {
             continue;
         }
 
-        // Handle new connections
+        // new connection
         if (FD_ISSET(server_fd, &read_fds)) {
-            int new_socket;
-            if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
+            int new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen);
+            if (new_socket < 0) {
                 perror("accept failed");
                 continue;
             }
-            // Add new socket to client_fds
             for (int i = 0; i < MAX_CLIENTS; i++) {
-                if (client_fds[i] == 0) {
-                    client_fds[i] = new_socket;
-                    break;
-                }
+                if (!clients[i].active) { clients[i].fd = new_socket; clients[i].active = 1; break; }
             }
         }
 
-        // Handle data from clients
+        // Données clients
         for (int i = 0; i < MAX_CLIENTS; i++) {
-            if (client_fds[i] > 0 && FD_ISSET(client_fds[i], &read_fds)) {
-                CallType call_type;
-                if (read(client_fds[i], &call_type, sizeof(CallType)) <= 0) {
-                    // Handle read error or client disconnection
-                    close(client_fds[i]);
-                    client_fds[i] = 0;
-                    continue;
-                }
+            if (!clients[i].active) continue;
+            if (!FD_ISSET(clients[i].fd, &read_fds)) continue;
 
-                switch (call_type) {
-                    case CONNECT: {
-                        printf("Received CONNECT command from client %d\n", i);
-                        char username[USERNAME_SIZE + 1];
-                        if (read(client_fds[i], username, USERNAME_SIZE + 1) <= 0) {
-                            // Handle read error or client disconnection
-                            close(client_fds[i]);
-                            client_fds[i] = 0;
-                            continue;
-                        }
-                        // Process CONNECT command
-                        User user = newUser(username, "");
-                        // Add to online users
-                        strcpy(online_user_names[online_users_count], username);
-                        online_users_count++;
-                        uint8_t user_buffer[1024]; // Ensure buffer is large enough
-                        serialize_User(&user, user_buffer);
-                        send(client_fds[i], user_buffer, sizeof(user_buffer), 0);
+            CallType call_type;
+            ssize_t n = read(clients[i].fd, &call_type, sizeof(CallType));
+            if (n <= 0) {
+                close(clients[i].fd);
+                clients[i].active = 0;
+                continue;
+            }
+
+            switch (call_type) {
+                case CONNECT: {
+                    char username[USERNAME_SIZE + 1] = {0};
+                    if (read(clients[i].fd, username, USERNAME_SIZE + 1) <= 0) {
+                        close(clients[i].fd);
+                        clients[i].active = 0;
                         break;
                     }
-                    case CHALLENGE: {
-                        printf("Received CHALLENGE command from client %d\n", i);
-                        int opponent_user_id;
-                        if (read(client_fds[i], &opponent_user_id, sizeof(int)) <= 0) {
-                            // Handle read error or client disconnection
-                            close(client_fds[i]);
-                            client_fds[i] = 0;
-                            continue;
-                        }
-                        // Process CHALLENGE command
+                    User user = newUser(username, "");
+                    printf("New user connected: %s (%d)\n", username, user.id);
+                    clients[i].user_id = user.id;
+                    strncpy(clients[i].username, username, USERNAME_SIZE);
+
+                    uint8_t user_buffer[1024] = {0};
+                    serialize_User(&user, user_buffer);
+                    send(clients[i].fd, user_buffer, sizeof(user_buffer), 0);
+                    break;
+                }
+                case CHALLENGE: {
+                    CallType error = ERROR;
+                    CallType success = SUCCESS;
+                    int opponent_user_id = 0;
+                    if (read(clients[i].fd, &opponent_user_id, sizeof(int)) <= 0) {
+                        close(clients[i].fd); clients[i].active = 0; break;
+                    }
+                    if(opponent_user_id == clients[i].user_id) {
+                        printf("User %s (id=%d) attempted to challenge themselves. Ignored.\n",
+                               clients[i].username, clients[i].user_id);
+                        char error_msg[] = "You cannot challenge yourself.";
+                        send(clients[i].fd, &error, sizeof(error), 0);
+                        send(clients[i].fd, error_msg, sizeof(error_msg), 0);
                         break;
                     }
-                    case LIST_USERS: {
-                        printf("Sending online users to client %d\n", i);
-                        char user_list_buffer[1024] = "";
-                        for (int u = 0; u < online_users_count; u++) {
-                            strcat(user_list_buffer, online_user_names[u]);
+                    // Find target client by user_id and send challenge
+                    int target = -1;
+                    for (int j = 0; j < MAX_CLIENTS; j++) {
+                        if (clients[j].active && clients[j].user_id == opponent_user_id) {
+                            target = j;
+                            break; }
+                    }
+                    if (target != -1) {
+                        CallType out = CHALLENGE;
+                        send(clients[target].fd, &out, sizeof(out), 0);
+                        send(clients[target].fd, &clients[i].user_id, sizeof(int), 0);
+                        send(clients[target].fd, clients[i].username, USERNAME_SIZE + 1, 0);
+                        printf("Challenge initialized by de %s(id=%d) to %s(id=%d) | socket %d to bind\n",
+                               clients[i].username, clients[i].user_id, clients[target].username, clients[target].user_id, clients[target].fd);
+                        send(clients[i].fd, &success, sizeof(success), 0);
+                    } else {
+                        printf("Utilisateur %d introuvable pour challenge.\n", opponent_user_id);
+                        char error_msg[] = "User not found or not online.";
+                        send(clients[i].fd, &error, sizeof(error), 0);
+                        send(clients[i].fd, error_msg, sizeof(error_msg), 0);
+                    }
+                    break;
+                }
+                case LIST_USERS: {
+                    char user_list_buffer[1024] = {0};
+                    for (int u = 0; u < MAX_CLIENTS; u++) {
+                        if (clients[u].active && clients[u].user_id != 0 && clients[u].fd != clients[i].fd) {
+                            strcat(user_list_buffer, clients[u].username);
+                            strcat(user_list_buffer, " (id=");
+                            char id_str[12];
+                            sprintf(id_str, "%d", clients[u].user_id);
+                            strcat(user_list_buffer, id_str);
+                            strcat(user_list_buffer, ")");
                             strcat(user_list_buffer, "\n");
                         }
-                        send(client_fds[i], user_list_buffer, strlen(user_list_buffer) + 1, 0);
-                        break;
                     }
-                    default:
-                        // Handle unknown CallType
-                        break;
+                    printf("Sending user list to %s (id=%d)\n", clients[i].username, clients[i].user_id);
+                    send(clients[i].fd, user_list_buffer, strlen(user_list_buffer) + 1, 0);
+                    break;
                 }
+                default: break;
             }
         }
     }
-
     return 0;
 }
