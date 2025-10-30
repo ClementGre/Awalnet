@@ -20,12 +20,14 @@ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 User user;
 
-// challenge variables
+// challenge variables (challenge received)
 int pending_challenge = 0;
 int challenger_id_global = -1;
 char challenger_username_global[USERNAME_SIZE + 1] = {0};
 int client_fd_global;
 
+// challenge variables (sent)
+int sent_challenges = 0;
 
 void *listen_server(void *arg) {
     int client_fd = *(int *)arg;
@@ -42,8 +44,8 @@ void *listen_server(void *arg) {
             pthread_mutex_lock(&lock);
             recv(client_fd, &challenger_id_global, sizeof(int), 0);
             recv(client_fd, challenger_username_global, USERNAME_SIZE + 1, 0);
+            printf("\n>>> Défi reçu de %s (id=%d) - enter any number to answer\n", challenger_username_global, challenger_id_global);
             pending_challenge = 1;
-            pthread_cond_signal(&cond_challenge);
             pthread_mutex_unlock(&lock);
         }
 
@@ -53,10 +55,13 @@ void *listen_server(void *arg) {
             recv(client_fd, &challenged_user_id, sizeof(int), 0);
             recv(client_fd, &answer, sizeof(int), 0);
 
-            if (answer == 0)
+            if (answer == 0) {
                 printf(">>> Votre défi à l'utilisateur %d a été refusé.\n", challenged_user_id);
-            else
+            }
+            else {
                 printf(">>> Votre défi à l'utilisateur %d a été accepté !\n", challenged_user_id);
+            }
+            sent_challenges--;
         }
 
         else if (incoming == ERROR) {
@@ -128,8 +133,6 @@ void handle_incoming_challenge() {
     strcpy(challenger_name, challenger_username_global);
     pending_challenge = 0;
     pthread_mutex_unlock(&lock);
-
-    printf("\n>>> Défi reçu de %s (id=%d)\n", challenger_name, challenger_id);
 
     int choix = -1;
     while (choix != 0 && choix != 1) {
@@ -235,6 +238,10 @@ int start_client() {
         }
 
         else if (choice == 3) {
+            if (sent_challenges){
+                printf("Vous avez déjà envoyé une demande, veuillez attendre la réponse avant d'en faire de nouvelles\n");
+                continue;
+            }
             int opponent_id;
             printf("Entrer l'id de l'adversaire: ");
             if (scanf("%d", &opponent_id) != 1) {
@@ -247,6 +254,7 @@ int start_client() {
             CallType ct = CHALLENGE;
             if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send failed");
             if (send(client_fd, &opponent_id, sizeof(int), 0) <= 0) perror("send failed");
+            sent_challenges++;
             printf(">>> En attente de la réponse de l'adversaire...\n");
         }
 
