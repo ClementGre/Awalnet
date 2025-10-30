@@ -35,11 +35,69 @@ void *listen_server(void *arg) {
         }
 
         if (incoming == CHALLENGE) {
+            pthread_mutex_lock(&lock);
+            CallType ct = CHALLENGE_REQUEST_ANSWER;
             int challenger_id;
             char challenger_username[USERNAME_SIZE + 1] = {0};
+
             recv(client_fd, &challenger_id, sizeof(int), 0);
             recv(client_fd, challenger_username, USERNAME_SIZE + 1, 0);
-            printf("\n>>> Défi reçu de %s (id=%d)\n", challenger_username, challenger_id);
+
+            printf("Défi reçu de %s (id=%d)\n", challenger_username, challenger_id);
+
+            int choix = -1;
+            int input_valid = 0;
+
+            // TODO : il faut que la lecture se fasse pour ça et pas pour le menu
+            while (!input_valid) {
+                printf("Accepter le défi ? (1 = Oui / 0 = Non) : ");
+                fflush(stdout);
+
+                if (scanf("%d", &choix) != 1) {
+                    printf("Entrée invalide. Veuillez entrer 0 ou 1.\n");
+                    while (getchar() != '\n');
+                    continue;
+                }
+                while (getchar() != '\n');
+
+                if (choix == 0 || choix == 1) {
+                    input_valid = 1;
+                } else {
+                    printf("Veuillez entrer 0 (refuser) ou 1 (accepter).\n");
+                }
+            }
+
+            if (send(client_fd, &ct, sizeof(ct), 0) <= 0) {
+                perror("calltype send failed");
+                pthread_mutex_unlock(&lock);
+                exit(EXIT_FAILURE);
+            }
+            if (send(client_fd, &challenger_id, sizeof(challenger_id), 0) <= 0) {
+                perror("challenger_id send failed");
+                pthread_mutex_unlock(&lock);
+                exit(EXIT_FAILURE);
+            }
+            if (send(client_fd, &choix, sizeof(choix), 0) <= 0) {
+                perror("choice send failed");
+                pthread_mutex_unlock(&lock);
+                exit(EXIT_FAILURE);
+            }
+            pthread_mutex_unlock(&lock);
+        }
+
+        else if (incoming == CHALLENGE_REQUEST_ANSWER){
+            int challenged_user_id;
+            int answer = -1;
+            recv(client_fd, &challenged_user_id, sizeof(int), 0);
+            recv(client_fd, &answer, sizeof (int), 0);
+            if (answer == 0){
+                printf("Your challenge proposal to %d has been refused\n", challenged_user_id);
+            }
+            else{
+                printf("Your challenge proposal to %d has been accepted !!\n", challenged_user_id);
+            }
+            pthread_cond_signal(&cond_challenge);
+
         }
         else if (incoming == ERROR) {
             char error_msg[256] = {0};
@@ -90,7 +148,7 @@ void *listen_server(void *arg) {
             }
             User user_received;
             deserialize_User(buffer, &user_received);
-            printf("Profile de l'utilisateur demandé :\n");
+            printf("Profil de l'utilisateur demandé :\n");
             printUser(&user_received);
             pthread_cond_signal(&cond_user_profile);
 
@@ -159,7 +217,6 @@ int start_client() {
     pthread_create(&listener_thread, NULL, listen_server, &client_fd);
 
     while (1) {
-        pthread_mutex_lock(&lock);
         printf("\n===== MENU =====\n");
         printf(" 1 - Voir votre profil\n");
         printf(" 2 - Afficher les utilisateurs en ligne\n");
@@ -205,6 +262,7 @@ int start_client() {
                 perror("send failed");
                 exit(EXIT_FAILURE);
             }
+            printf("En attente de la réponse de l'adversaire ...\n");
             pthread_cond_wait(&cond_challenge, &lock);
         }
         else if (choice == 4) {
@@ -236,7 +294,6 @@ int start_client() {
         else {
             printf("Choix invalide.\n");
         }
-        pthread_mutex_unlock(&lock);
     }
 
     return 0;

@@ -123,7 +123,6 @@ int start_server() {
                 }
                 case CHALLENGE: {
                     CallType error = ERROR;
-                    CallType success = SUCCESS;
                     int opponent_user_id = 0;
                     if (read(clients[i].fd, &opponent_user_id, sizeof(int)) <= 0) {
                         close(clients[i].fd); clients[i].active = 0; break;
@@ -151,9 +150,46 @@ int start_server() {
                         send(clients[target].fd, clients[i].username, USERNAME_SIZE + 1, 0);
                         printf("Challenge initialized by de %s(id=%d) to %s(id=%d) | socket %d to bind\n",
                                clients[i].username, clients[i].user_id, clients[target].username, clients[target].user_id, clients[target].fd);
-                        send(clients[i].fd, &success, sizeof(success), 0);
                     } else {
                         printf("Utilisateur %d introuvable pour challenge.\n", opponent_user_id);
+                        char error_msg[] = "User not found or not online.";
+                        send(clients[i].fd, &error, sizeof(error), 0);
+                        send(clients[i].fd, error_msg, sizeof(error_msg), 0);
+                    }
+                    break;
+                }
+                case CHALLENGE_REQUEST_ANSWER: {
+                    CallType error = ERROR;
+                    int request_user_id = 0;
+                    if (read(clients[i].fd, &request_user_id, sizeof(int)) <= 0) {
+                        close(clients[i].fd);
+                        clients[i].active = 0;
+                        break;
+                    }
+
+                    int answer = - 1;
+                    if (read(clients[i].fd, &answer, sizeof(answer)) <= 0) {
+                        close(clients[i].fd);
+                        clients[i].active = 0;
+                        break;
+                    }
+                    // Find target client by user_id and send answer
+                    int target = -1;
+                    for (int j = 0; j < MAX_CLIENTS; j++) {
+                        if (clients[j].active && clients[j].user_id == request_user_id) {
+                            target = j;
+                            break;
+                        }
+                    }
+                    if (target != -1) {
+                        CallType out = CHALLENGE_REQUEST_ANSWER;
+                        send(clients[target].fd, &out, sizeof(out), 0);
+                        send(clients[target].fd, &clients[i].user_id, sizeof(int), 0);
+                        send(clients[target].fd, &answer, sizeof(int), 0);
+
+
+                    } else {
+                        printf("Utilisateur %d introuvable pour challenge.\n", request_user_id);
                         char error_msg[] = "User not found or not online.";
                         send(clients[i].fd, &error, sizeof(error), 0);
                         send(clients[i].fd, error_msg, sizeof(error_msg), 0);
