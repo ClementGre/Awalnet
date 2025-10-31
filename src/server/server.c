@@ -153,7 +153,9 @@ int start_server() {
                     } else {
                         printf("Utilisateur %d introuvable pour challenge.\n", opponent_user_id);
                         char error_msg[] = "User not found or not online.";
+                        int previous_call = CHALLENGE;
                         send(clients[i].fd, &error, sizeof(error), 0);
+                        send(clients[i].fd, &previous_call, sizeof (previous_call), 0);
                         send(clients[i].fd, error_msg, sizeof(error_msg), 0);
                     }
                     break;
@@ -186,12 +188,27 @@ int start_server() {
                         send(clients[target].fd, &out, sizeof(out), 0);
                         send(clients[target].fd, &clients[i].user_id, sizeof(int), 0);
                         send(clients[target].fd, &answer, sizeof(int), 0);
+                        if (answer == 1) {
+                            printf("Challenge accepted by %s(id=%d) to %s(id=%d) | socket %d to bind\n",
+                                   clients[i].username, clients[i].user_id, clients[target].username, clients[target].user_id, clients[target].fd);
+                            CallType out = CHALLENGE_START;
+                            // notify both clients that the challenge is starting now
+                            send(clients[i].fd, &out, sizeof(out), 0);
+                            send(clients[i].fd, &clients[target].username, sizeof(clients[target].username), 0);
+                            send(clients[target].fd, &out, sizeof(out), 0);
+                            send(clients[target].fd, &clients[i].username, sizeof(clients[i].username), 0);
+
+                            // Further game initialization would go here
+
+                        }
 
 
                     } else {
                         printf("Utilisateur %d introuvable pour challenge.\n", request_user_id);
                         char error_msg[] = "User not found or not online.";
+                        int previous_call = CHALLENGE_REQUEST_ANSWER;
                         send(clients[i].fd, &error, sizeof(error), 0);
+                        send(clients[i].fd, &previous_call, sizeof (previous_call), 0);
                         send(clients[i].fd, error_msg, sizeof(error_msg), 0);
                     }
                     break;
@@ -251,7 +268,9 @@ int start_server() {
                     } else {
                         printf("Utilisateur %d introuvable -> on ne peut pas afficher son profile.\n", requested_user_id);
                         char error_msg[] = "User not found or not online.";
+                        int previous_call = CONSULT_USER_PROFILE;
                         send(clients[i].fd, &error, sizeof(error), 0);
+                        send(clients[i].fd, &previous_call, sizeof (previous_call), 0);
                         send(clients[i].fd, error_msg, sizeof(error_msg), 0);
                     }
                     break;

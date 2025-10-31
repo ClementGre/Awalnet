@@ -15,8 +15,19 @@ typedef enum CallType {
     SENT_USER_PROFILE = 8, // Answer to CONSULT_USER_PROFILE -> send the user profile to the server
     RECEIVE_USER_PROFILE = 9, // Answer to sent_user_profile
     CHALLENGE_REQUEST_ANSWER = 10, // Answer to challenge to inform wether or not we accept the challenge request
+    CHALLENGE_START = 11, // Notify both clients that the challenge is starting now
+    YOUR_TURN = 12, // Notify the client that it's their turn to play
 
 } CallType;
+
+
+typedef  enum ERROR_CODE {
+    USER_NOT_FOUND = 1,
+    USER_OFFLINE = 2,
+    CANNOT_CHALLENGE_YOURSELF =3,
+    ALREADY_IN_GAME =4,
+    UNKNOWN_ERROR = 99
+} ERROR_CODE;
 
 
 // Serialize User struct into a byte buffer

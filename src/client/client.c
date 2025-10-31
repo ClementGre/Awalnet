@@ -29,6 +29,19 @@ int client_fd_global;
 // challenge variables (sent)
 int sent_challenges = 0;
 
+// ongoing game variables
+pthread_cond_t cond_game = PTHREAD_COND_INITIALIZER;
+int in_game = 0;
+
+// selected input in the terminal
+int choice_input = -1;
+
+void clear_terminal() {
+    printf("\033[2J\033[H"); // efface l’écran et remet le curseur en haut
+    fflush(stdout);
+}
+
+
 void *listen_server(void *arg) {
     int client_fd = *(int *)arg;
     CallType incoming;
@@ -44,7 +57,8 @@ void *listen_server(void *arg) {
             pthread_mutex_lock(&lock);
             recv(client_fd, &challenger_id_global, sizeof(int), 0);
             recv(client_fd, challenger_username_global, USERNAME_SIZE + 1, 0);
-            printf("\n>>> Défi reçu de %s (id=%d) - enter any number to answer\n", challenger_username_global, challenger_id_global);
+            printf("\n>>> Défi reçu de %s (id=%d)\n", challenger_username_global, challenger_id_global);
+            printf("Accepter le défi ? (1 = Oui / 0 = Non) : ");
             pending_challenge = 1;
             pthread_mutex_unlock(&lock);
         }
@@ -56,20 +70,37 @@ void *listen_server(void *arg) {
             recv(client_fd, &answer, sizeof(int), 0);
 
             if (answer == 0) {
-                printf(">>> Votre défi à l'utilisateur %d a été refusé.\n", challenged_user_id);
+                printf("\n>>> Votre défi à l'utilisateur %d a été refusé.\n", challenged_user_id);
             }
             else {
-                printf(">>> Votre défi à l'utilisateur %d a été accepté !\n", challenged_user_id);
+                printf("\n>>> Votre défi à l'utilisateur %d a été accepté !", challenged_user_id);
             }
             sent_challenges--;
         }
 
         else if (incoming == ERROR) {
             char error_msg[256] = {0};
+            int previous_call;
+            recv(client_fd, &previous_call, sizeof(int), 0);
             recv(client_fd, error_msg, sizeof(error_msg), 0);
             printf(">>> Erreur : %s\n", error_msg);
-            pthread_cond_signal(&cond_list_users);
-            pthread_cond_signal(&cond_user_profile);
+            switch (previous_call) {
+                case CHALLENGE:
+                    sent_challenges--;
+                    break;
+                case CONSULT_USER_PROFILE:
+                    pthread_cond_signal(&cond_user_profile);
+                    break;
+                case CHALLENGE_REQUEST_ANSWER:
+                    // nothing to do here for now
+                    break;
+                case LIST_USERS:
+                    pthread_cond_signal(&cond_list_users);
+                    break;
+
+                default:
+                    break;
+            }
         }
 
         else if (incoming == SUCCESS) {
@@ -110,9 +141,25 @@ void *listen_server(void *arg) {
             printUser(&user_received);
             pthread_cond_signal(&cond_user_profile);
         }
+        else if (incoming == CHALLENGE_START) {
+            char opponent_username[USERNAME_SIZE + 1] = {0};
+            recv(client_fd, opponent_username, USERNAME_SIZE + 1, 0);
+
+            pthread_mutex_lock(&lock);
+            in_game = 1;
+
+            strcpy(challenger_username_global, opponent_username);
+            clear_terminal();
+            printf("\n>>> Le défi avec %s commence maintenant !\n", opponent_username);
+            play_game(); // ici le jeu se déroule
+
+            in_game = 0;
+            pthread_cond_signal(&cond_game); // réveille le menu
+            pthread_mutex_unlock(&lock);
+        }
 
         else {
-            printf(">>> Message inconnu reçu du serveur.\n");
+            printf("\n>>> Message inconnu reçu du serveur.\n");
         }
 
         fflush(stdout);
@@ -134,11 +181,9 @@ void handle_incoming_challenge() {
     pending_challenge = 0;
     pthread_mutex_unlock(&lock);
 
-    int choix = -1;
-    while (choix != 0 && choix != 1) {
-        printf("Accepter le défi ? (1 = Oui / 0 = Non) : ");
-        if (scanf("%d", &choix) != 1) {
-            printf("Entrée invalide.\n");
+    while (choice_input != 0 && choice_input != 1) {
+        printf("1 pour accepter, 0 pour refuser : ");
+        if (scanf("%d", &choice_input) != 1) {
             while (getchar() != '\n');
             continue;
         }
@@ -148,13 +193,22 @@ void handle_incoming_challenge() {
     CallType ct = CHALLENGE_REQUEST_ANSWER;
     if (send(client_fd_global, &ct, sizeof(ct), 0) <= 0) perror("send ct");
     if (send(client_fd_global, &challenger_id, sizeof(challenger_id), 0) <= 0) perror("send id");
-    if (send(client_fd_global, &choix, sizeof(choix), 0) <= 0) perror("send choix");
+    if (send(client_fd_global, &choice_input, sizeof(choice_input), 0) <= 0) perror("send choix");
 
-    if (choix == 1)
+    if (choice_input == 1) {
+        // if accepted, we wait for the server to start the game
         printf(">>> Vous avez accepté le défi de %s !\n", challenger_name);
+        pthread_mutex_lock(&lock);
+        in_game = 1;
+        pthread_mutex_unlock(&lock);
+
+    }
+
     else
         printf(">>> Vous avez refusé le défi de %s.\n", challenger_name);
 }
+
+void play_game() ;
 
 int start_client() {
     int client_fd;
@@ -207,7 +261,21 @@ int start_client() {
     pthread_create(&listener_thread, NULL, listen_server, &client_fd);
 
     while (1) {
+        // let the chance for incoming messages from the server to arrive and be displayed before showing the menu again
+        sleep(0.5);
+        pthread_mutex_lock(&lock);
+        while (in_game) {
+            pthread_cond_wait(&cond_game, &lock);
+        }
+        pthread_mutex_unlock(&lock);
+
+        // handle incoming changes will set pending_challenge to 1 if there is a challenge that has been accepted
         handle_incoming_challenge();
+
+        if (in_game){
+            // in this case, the input must be used for the game and not for the menu
+            continue;
+        }
 
         printf("\n===== MENU =====\n");
         printf(" 1 - Voir votre profil\n");
@@ -217,19 +285,27 @@ int start_client() {
         printf(" 5 - Quitter\n");
         printf("Votre choix: ");
 
-        int choice;
-        if (scanf("%d", &choice) != 1) {
+        if (scanf("%d", &choice_input) != 1) {
             printf("Entrée invalide.\n");
             while (getchar() != '\n');
             continue;
         }
         while (getchar() != '\n');
 
-        if (choice == 1) {
+        if (pending_challenge){
+            // in this case, the input must be used to answer the challenge and not for the menu
+            continue;
+        }
+
+        if (in_game){
+            // when the challenger has his challenge accepted, we enter the game directly
+            continue;
+        }
+        if (choice_input == 1) {
             printUser(&user);
         }
 
-        else if (choice == 2) {
+        else if (choice_input == 2) {
             CallType ct = LIST_USERS;
             if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send failed");
             pthread_mutex_lock(&lock);
@@ -237,7 +313,7 @@ int start_client() {
             pthread_mutex_unlock(&lock);
         }
 
-        else if (choice == 3) {
+        else if (choice_input == 3) {
             if (sent_challenges){
                 printf("Vous avez déjà envoyé une demande, veuillez attendre la réponse avant d'en faire de nouvelles\n");
                 continue;
@@ -258,7 +334,7 @@ int start_client() {
             printf(">>> En attente de la réponse de l'adversaire...\n");
         }
 
-        else if (choice == 4) {
+        else if (choice_input == 4) {
             int user_profile_id;
             printf("Entrer l'id du joueur: ");
             if (scanf("%d", &user_profile_id) != 1) {
@@ -277,7 +353,7 @@ int start_client() {
             pthread_mutex_unlock(&lock);
         }
 
-        else if (choice == 5) {
+        else if (choice_input == 5) {
             close(client_fd);
             printf("Déconnecté.\n");
             exit(EXIT_SUCCESS);
@@ -290,3 +366,15 @@ int start_client() {
 
     return 0;
 }
+
+void play_game() {
+    // Placeholder for game logic
+    printf("Le jeu entre vous et %s va commencer !\n", challenger_username_global);
+    while (1) {
+        // if the server notifies that the game is over, we exit the loop
+        // if the server notifies the client of the opponent's move, we update the game state
+        // if it's the player's turn, we ask for input and send the move to the server
+    }
+}
+
+

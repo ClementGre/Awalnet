@@ -28,6 +28,7 @@ make && ./bin/awalnet
 
 ## Processes
 
+!! when an error is returned from the server, it also sends the id of the previous call to help the client identify which call caused the error !!
 ### CONNECT
 ```mermaid
 sequenceDiagram
@@ -52,8 +53,10 @@ Server->>Client: List of connected users (usernames + ids)
 ```mermaid
 sequenceDiagram
 Challenger->>Server: CHALLENGE (target user id)
+Server->>Challenger: continue business as usual 
 Server->>Challenged: CHALLENGE notification (from Challenger)
-Server->>Challenger: SUCCESS or ERROR (depending on delivery)
+Challenged->>Server: CHALLENGE_REQUEST_ANSWER notification (ACCEPT or REJECT)
+Server->>Challenger: CHALLENGE_REQUEST_ANSWER notification
 ```
 
 ### CONSULT_USER_PROFILE
