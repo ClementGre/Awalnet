@@ -5,9 +5,10 @@
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/select.h>
+#include <stdlib.h>
 
 
-#define MAX_ROUNDS 5
+#define MAX_ROUNDS 10
 #define MIN_SEEDS 6
 #define WINNING_SCORE 25
 
@@ -27,7 +28,8 @@ typedef struct User {
 
 typedef struct Player {
     int score;
-    User *user;
+    int user_id; // No need to store the whole User struct here, only the id matters
+    int fd;
 } Player;
 
 typedef struct GamePreview {
@@ -67,8 +69,8 @@ void printBoard(const int *board, int  player);
 void printGame(Game *game, int player);
 
 User newUser(const char* username, char* bio);
-Player newPlayer(User *user);
-Game newGame(Player player1, Player player2);
+Player newPlayer(int user_id, int fd);
+Game *newGame(Player *player1, Player *player2);
 int moveSeeds(Game *game, int start_position);
 int collectSeedsAndCountPoints(Game *game, int position, int player);
 int playerSeedsLeft(Game *game, int player);

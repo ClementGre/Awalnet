@@ -17,6 +17,7 @@ pthread_cond_t cond_challenge = PTHREAD_COND_INITIALIZER;
 pthread_cond_t cond_user_profile = PTHREAD_COND_INITIALIZER;
 pthread_cond_t cond_list_users = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t lock_turn = PTHREAD_MUTEX_INITIALIZER;
 
 User user;
 
@@ -31,7 +32,12 @@ int sent_challenges = 0;
 
 // ongoing game variables
 pthread_cond_t cond_game = PTHREAD_COND_INITIALIZER;
+pthread_cond_t cond_game_turn = PTHREAD_COND_INITIALIZER;
+
 int in_game = 0;
+int last_move = -1;
+int game_over = -1;
+Game *game = NULL;
 
 // selected input in the terminal
 int choice_input = -1;
@@ -39,6 +45,97 @@ int choice_input = -1;
 void clear_terminal() {
     printf("\033[2J\033[H"); // efface l’écran et remet le curseur en haut
     fflush(stdout);
+}
+
+void *play_game(void *arg) {
+    int client_fd = *(int *)arg;
+    // 1 for player 1, 2 for player 2
+    int order = 0;
+
+    Player me = newPlayer(user.id, client_fd);
+    Player opponent = newPlayer(-1, -1); // unknown for now and not needed
+    printf("Joueurs créés\n");
+    while (1) {
+        pthread_mutex_lock(&lock_turn);
+        pthread_cond_wait(&cond_game_turn, &lock_turn);
+        if (game_over != -1) {
+            if (game_over == 1) {
+                printf("\n>>> Vous avez gagné la partie ! Félicitations !\n");
+            } else if (game_over == 0) {
+                printf("\n>>> Vous avez perdu la partie. Bonne chance pour la prochaine fois !\n");
+            } else {
+                printf("\n>>> La partie s'est terminée par un match nul.\n");
+            }
+            // reset game variables
+            in_game = 0;
+            last_move = -1;
+            game_over = -1;
+            free(game);
+            game = NULL;
+            pthread_mutex_unlock(&lock_turn);
+            return NULL;
+        }
+        int move_played = last_move;
+        if (game == NULL) {
+            // it means it's the first turn of the game and we are the first player
+            if (move_played == -1) {
+                game = newGame(&me, &opponent);
+                order = 1;
+            } else {
+                game = newGame(&opponent, &me);
+                order = 2;
+            }
+            printf("\n>>> La partie commence ! Vous êtes le joueur %d.\n", order);
+        }
+
+
+        printf("\n>>> C'est votre tour de jouer !\n");
+        if (move_played != -1) {
+            printf("Le dernier coup joué était la position %d.\n", move_played);
+            // update the game state with the last move played by the opponent
+            int adjusted_position = (order == 2) ? move_played + 5 : move_played - 1;
+            moveSeeds(game, adjusted_position);
+            int opponent_order = (order == 1) ? 2 : 1;
+            opponent.score += collectSeedsAndCountPoints(game, adjusted_position, opponent_order);
+
+
+            printf("SCORE : Vous %d - Adversaire %d\n", me.score, opponent.score);
+        } else {
+            printf("Vous êtes le premier à jouer.\n");
+        }
+
+        printGame(game, order);
+
+
+        printf("ENTREZ UNE POSITION DE CASE POUR DÉPLACER LES GRAINES\n");
+        scanf("%d", &choice_input);
+
+        // if exceds 5 of <0
+        while (choice_input < 1 || choice_input > 6) {
+            printf("PLAYER 1 - ENTER A CELL POSITION BETWEEN 1 AND 6: ");
+            scanf("%d", &choice_input);
+        }
+
+        // if the player has 0 seeds in that hole, he needs to select another one
+        int adjusted_position = (order == 1) ? choice_input - 1 : choice_input + 5;
+        while (game->board[adjusted_position] == 0) {
+            printf("PLAYER 1 - ENTER A CELL POSITION WHERE YOU HAVE MORE THAN 1 SEED : ");
+            scanf("%d", &choice_input);
+            adjusted_position = (order == 1) ? choice_input - 1 : choice_input + 5;
+        }
+        // add our points
+        int position_of_last_put_seed = moveSeeds(game, adjusted_position);
+        me.score += collectSeedsAndCountPoints(game, position_of_last_put_seed, order);
+
+        CallType ct = PLAY_MADE;
+        send(client_fd, &ct, sizeof(ct), 0);
+        send(client_fd, &choice_input, sizeof(choice_input), 0);
+        pthread_mutex_unlock(&lock_turn);
+        printf("\n>>> Coup joué : position %d envoyée au serveur.\n", choice_input);
+
+
+        return NULL;
+    }
 }
 
 
@@ -142,21 +239,39 @@ void *listen_server(void *arg) {
             pthread_cond_signal(&cond_user_profile);
         }
         else if (incoming == CHALLENGE_START) {
+            pthread_mutex_lock(&lock);
             char opponent_username[USERNAME_SIZE + 1] = {0};
             recv(client_fd, opponent_username, USERNAME_SIZE + 1, 0);
-
-            pthread_mutex_lock(&lock);
-            in_game = 1;
-
-            strcpy(challenger_username_global, opponent_username);
             clear_terminal();
             printf("\n>>> Le défi avec %s commence maintenant !\n", opponent_username);
-            play_game(); // ici le jeu se déroule
 
-            in_game = 0;
-            pthread_cond_signal(&cond_game); // réveille le menu
+            in_game = 1;
+
+            pthread_t game_thread;
+            // start the game in a new thread
+            pthread_create(&game_thread, NULL, play_game, &client_fd);
             pthread_mutex_unlock(&lock);
         }
+
+        else if (incoming == YOUR_TURN) {
+            int move_played;
+            recv(client_fd, &move_played, sizeof(move_played), 0);
+            printf("\n>>> Le serveur a notifié que c'est votre tour de jouer.\n");
+            pthread_mutex_lock(&lock);
+            last_move = move_played;
+            pthread_cond_signal(&cond_game_turn);
+            pthread_mutex_unlock(&lock);
+        }
+        else if (incoming == GAME_OVER) {
+            int result;
+            recv(client_fd, &result, sizeof(result), 0);
+            printf("\n>>> Le serveur a notifié que la partie est terminée.\n");
+            pthread_mutex_lock(&lock);
+            game_over = result;
+            in_game = 0;
+            pthread_mutex_unlock(&lock);
+        }
+
 
         else {
             printf("\n>>> Message inconnu reçu du serveur.\n");
@@ -208,7 +323,6 @@ void handle_incoming_challenge() {
         printf(">>> Vous avez refusé le défi de %s.\n", challenger_name);
 }
 
-void play_game() ;
 
 int start_client() {
     int client_fd;
@@ -269,8 +383,12 @@ int start_client() {
         }
         pthread_mutex_unlock(&lock);
 
+
         // handle incoming changes will set pending_challenge to 1 if there is a challenge that has been accepted
         handle_incoming_challenge();
+
+        // if we are in a game, we skip the menu and play the game
+        //play_game();
 
         if (in_game){
             // in this case, the input must be used for the game and not for the menu
@@ -367,14 +485,5 @@ int start_client() {
     return 0;
 }
 
-void play_game() {
-    // Placeholder for game logic
-    printf("Le jeu entre vous et %s va commencer !\n", challenger_username_global);
-    while (1) {
-        // if the server notifies that the game is over, we exit the loop
-        // if the server notifies the client of the opponent's move, we update the game state
-        // if it's the player's turn, we ask for input and send the move to the server
-    }
-}
 
 

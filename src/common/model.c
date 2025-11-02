@@ -7,8 +7,7 @@ void printUser(User *user) {
 
 void printPlayer(Player *player) {
     printf("Player {\n");
-    printf("  user: ");
-    printUser(player->user);
+    printf("  user: %d\n", player->user_id);
     printf("  score: %d\n", player->score);
     printf("}\n");
 }
@@ -67,20 +66,25 @@ User newUser(char const *username, char *bio) {
     return user;
 }
 
-Player newPlayer(User *user) {
+Player newPlayer(int user_id, int fd) {
     return (Player){
         .score = 0,
-        .user = user
+        .user_id = user_id,
+        .fd = fd
     };
 }
 
-Game newGame(Player player1, Player player2) {
-    return (Game){
-        .player1 = player1,
-        .player2 = player2,
-        .board = {4,4,4,4,4,4,4,4,4,4,4,4}
+Game *newGame(Player *player1, Player *player2) {
+    Game *game = (Game *)malloc(sizeof(Game));
+    if (!game) return NULL;
 
-    };
+    game->player1 = *player1;
+    game->player2 = *player2;
+
+    for (int i = 0; i < 12; i++) {
+        game->board[i] = 4;
+    }
+    return game;
 }
 
 int moveSeeds(Game *game, int start_position) {

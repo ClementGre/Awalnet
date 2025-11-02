@@ -16,11 +16,13 @@ typedef enum CallType {
     RECEIVE_USER_PROFILE = 9, // Answer to sent_user_profile
     CHALLENGE_REQUEST_ANSWER = 10, // Answer to challenge to inform wether or not we accept the challenge request
     CHALLENGE_START = 11, // Notify both clients that the challenge is starting now
-    YOUR_TURN = 12, // Notify the client that it's their turn to play
+    PLAY_MADE = 12, // Notify the server that a play has been made, followed by
+    YOUR_TURN = 13, // Notify the client that it's their turn to play
+    GAME_OVER = 14 // Notify the client that the game is over (followed by 1 for win, 0 for lose)
 
 } CallType;
 
-
+// Maybe we could use those error codes to be more specific about what went wrong during a challenge request
 typedef  enum ERROR_CODE {
     USER_NOT_FOUND = 1,
     USER_OFFLINE = 2,

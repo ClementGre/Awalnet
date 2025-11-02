@@ -24,11 +24,12 @@ int main(void) {
     users[0] = &user1;
     users[1] = &user2;
 
-    Player player1 = newPlayer(&user1);
-    Player player2 = newPlayer(&user2);
+    int fd = 0; // unused for now
+    Player player1 = newPlayer(user1.id, fd);
+    Player player2 = newPlayer(user2.id, fd);
 
     // initialize the game
-    Game game = newGame(player1, player2);
+    Game *game = newGame(&player1, &player2);
     
     // display both users
     printUser(&user1);
@@ -55,17 +56,17 @@ int main(void) {
             break;
         }
 
-        if (player1.score == WINNING_SCORE || playerSeedsLeft(&game, 2) < 6) {
+        if (player1.score == WINNING_SCORE || playerSeedsLeft(game, 2) < 6) {
             printf("\n---------------- PLAYER 1 WON !!! --------------\n");
              break;
         }
 
-        if (player2.score == WINNING_SCORE || playerSeedsLeft(&game, 1) < 6) {
+        if (player2.score == WINNING_SCORE || playerSeedsLeft(game, 1) < 6) {
             printf("\n---------------- PLAYER 2 WON !!! --------------\n");
             break;
         }
         // -------------------- PLAYER 1 ------------------------------------
-        printGame(&game, 1);
+        printGame(game, 1);
         printf("SCORES :\n Player 1 %d VS Playe 2 %d\n", player1.score, player2.score);
         // player 1 plays
         // displays the board
@@ -80,7 +81,7 @@ int main(void) {
         }
 
         // if the player has 0 seeds in that hole, he needs to select another one
-        while (game.board[position - 1]== 0) {
+        while (game->board[position - 1]== 0) {
             printf("PLAYER 1 - ENTER A CELL POSITION WHERE YOU HAVE MORE THAN 1 SEED : ");
             scanf("%d", &position);
         }
@@ -90,15 +91,15 @@ int main(void) {
         // then moves the seeds to other cells
         printf("moving seeds to other cells\n");
         // - 5 the ensure it matches the stored indexes
-        int position_of_last_put_seed = moveSeeds(&game, position  - 1);
+        int position_of_last_put_seed = moveSeeds(game, position  - 1);
         printf("stopped on position :%d\n", position_of_last_put_seed);
 
-        player1.score += collectSeedsAndCountPoints(&game, position_of_last_put_seed, 1);
+        player1.score += collectSeedsAndCountPoints(game, position_of_last_put_seed, 1);
         printf("score of player 1 : %d\n", player1.score);
 
 
         // -------------------- PLAYER 2 ------------------------------------
-        printGame(&game, 2);
+        printGame(game, 2);
         // player 1 plays
         // displays the board
         position = 0;
@@ -112,7 +113,7 @@ int main(void) {
         }
 
         // if the player has 0 seeds in that hole, he needs to select another one
-        while (game.board[5 + position ]== 0) {
+        while (game->board[5 + position ]== 0) {
             printf("PLAYER 2 - ENTER A CELL POSITION WHERE YOU HAVE MORE THAN 1 SEED : ");
             scanf("%d", &position);
         }
@@ -121,10 +122,10 @@ int main(void) {
 
         // then moves the seeds to other cells
         printf("moving seeds to other cells\n");
-        position_of_last_put_seed = moveSeeds(&game, position + 5);
+        position_of_last_put_seed = moveSeeds(game, position + 5);
         printf("stopped on position :%d\n", position_of_last_put_seed);
 
-        player2.score += collectSeedsAndCountPoints(&game, position_of_last_put_seed, 2);
+        player2.score += collectSeedsAndCountPoints(game, position_of_last_put_seed, 2);
         printf("score of player 2 : %d\n", player2.score);
 
         rounds++;
