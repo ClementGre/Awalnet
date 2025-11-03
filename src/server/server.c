@@ -82,7 +82,6 @@ void *game_thread(void *arg) {
     int move_made = -1;
     while (g->running && tours <= MAX_ROUNDS) {
 
-
         // if tours%2 ==0 player 1 else player 2
         // FIRST NOTIFY THE CURRENT PLAYER IT'S THEIR TURN
         Player current_player = (tours % 2 == 0) ? g->game->player1 : g->game->player2;
@@ -127,12 +126,14 @@ void *game_thread(void *arg) {
 
         // then process the move to update to board and scores
         if (tours % 2 == 0) {
+            // if the first player played
             int position_of_last_put_seed = moveSeeds(g->game, move_made  - 1);
             printf("stopped on position :%d\n", position_of_last_put_seed);
 
             g->game->player1.score += collectSeedsAndCountPoints(g->game, position_of_last_put_seed, 1);
         }
         else {
+            // the second player made the last move
             int position_of_last_put_seed = moveSeeds(g->game, move_made + 5);
             printf("stopped on position :%d\n", position_of_last_put_seed);
             g->game->player2.score += collectSeedsAndCountPoints(g->game, position_of_last_put_seed, 2);
@@ -240,7 +241,12 @@ int start_server() {
                 continue;
             }
             for (int i = 0; i < MAX_CLIENTS; i++) {
-                if (!clients[i].active) { clients[i].fd = new_socket; clients[i].active = 1; break; }
+                if (!clients[i].active) {
+                    clients[i].fd = new_socket;
+                    clients[i].active = 1;
+                    clients[i].in_game = 0;
+                    break;
+                }
             }
         }
 

@@ -50,6 +50,7 @@ void printBoard(const int *board, int player) {
 void printGame(Game *game, int player) {
     printf("Game {\n  board: \n");
     printBoard(game->board, player);
+    printf("    SCORE : p1 : %d | p2 : %d\n", game->player1.score, game->player2.score);
     printf("}\n");
 }
 
