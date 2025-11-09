@@ -158,6 +158,7 @@ void *play_game(void *arg) {
 
 
 void *listen_server(void *arg) {
+    // this thread listens to incoming messages from the server
     int client_fd = *(int *)arg;
     CallType incoming;
 
@@ -169,6 +170,7 @@ void *listen_server(void *arg) {
         }
 
         if (incoming == CHALLENGE) {
+            // if a challenge is received
             pthread_mutex_lock(&lock);
             recv(client_fd, &challenger_id_global, sizeof(int), 0);
             recv(client_fd, challenger_username_global, USERNAME_SIZE + 1, 0);
@@ -179,6 +181,7 @@ void *listen_server(void *arg) {
         }
 
         else if (incoming == CHALLENGE_REQUEST_ANSWER) {
+            // response to a sent challenge
             int challenged_user_id;
             int answer = -1;
             recv(client_fd, &challenged_user_id, sizeof(int), 0);
@@ -194,6 +197,7 @@ void *listen_server(void *arg) {
         }
 
         else if (incoming == ERROR) {
+            // an error occurred in the previous call
             char error_msg[256] = {0};
             int previous_call;
             recv(client_fd, &previous_call, sizeof(int), 0);
@@ -201,15 +205,18 @@ void *listen_server(void *arg) {
             printf(">>> Erreur : %s\n", error_msg);
             switch (previous_call) {
                 case CHALLENGE:
+                    // this means our challenge was not sent correctly (maybe the user id does not exist)
                     sent_challenges--;
                     break;
                 case CONSULT_USER_PROFILE:
+                    // it means we could not get the user profile, so we unblock the waiting thread
                     pthread_cond_signal(&cond_user_profile);
                     break;
                 case CHALLENGE_REQUEST_ANSWER:
-                    // nothing to do here for now
+                    // in case of error we consider the challenge was refused (should be implemented in the future)
                     break;
                 case LIST_USERS:
+                    // it means we could not get the user list, so we unblock the waiting thread
                     pthread_cond_signal(&cond_list_users);
                     break;
 
@@ -219,11 +226,13 @@ void *listen_server(void *arg) {
         }
 
         else if (incoming == SUCCESS) {
+            // confirmation of a successful previous call (for now only used for challenge sent)
             printf(">>> Votre demande a été envoyée avec succès.\n");
             pthread_cond_signal(&cond_list_users);
         }
 
         else if (incoming == LIST_USERS) {
+            // receiving the list of online users
             char user_list_buffer[1024] = {0};
             recv(client_fd, user_list_buffer, sizeof(user_list_buffer), 0);
             printf("Utilisateurs en ligne :\n%s\n", user_list_buffer);
@@ -231,13 +240,16 @@ void *listen_server(void *arg) {
         }
 
         else if (incoming == CONSULT_USER_PROFILE) {
+            // we need to sent our user profile to the server because somebody requested it
             CallType ct = SENT_USER_PROFILE;
+            // we need to know who asked for it (to send the correct profile)
             int request_user_id;
             recv(client_fd, &request_user_id, sizeof(int), 0);
 
             if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send ct");
             if (send(client_fd, &request_user_id, sizeof(int), 0) <= 0) perror("send id");
 
+            // user buffer to serialize our profile into
             uint8_t user_buffer[1024] = {0};
             serialize_User(&user, user_buffer);
             if (send(client_fd, &user_buffer, sizeof(user_buffer), 0) <= 0)
@@ -245,6 +257,7 @@ void *listen_server(void *arg) {
         }
 
         else if (incoming == RECEIVE_USER_PROFILE) {
+            // receiving a user profile we requested
             uint8_t buffer[1024] = {0};
             if (recv(client_fd, buffer, sizeof(buffer), 0) <= 0) {
                 perror("recv failed");
@@ -257,6 +270,7 @@ void *listen_server(void *arg) {
             pthread_cond_signal(&cond_user_profile);
         }
         else if (incoming == CHALLENGE_START) {
+            // the challenge has started, we can start the game thread with a lock to ensure the creation this code is fully executed before any game messages arrive
             pthread_mutex_lock(&lock_turn);
             char opponent_username[USERNAME_SIZE + 1] = {0};
             recv(client_fd, opponent_username, USERNAME_SIZE + 1, 0);
@@ -268,6 +282,7 @@ void *listen_server(void *arg) {
             int *fd_arg = malloc(sizeof(int));
             *fd_arg = client_fd;
             pthread_t game_thread;
+            // create the game thread
             if (pthread_create(&game_thread, NULL, play_game, fd_arg) != 0) {
                 perror("pthread_create");
                 free(fd_arg);
@@ -278,6 +293,7 @@ void *listen_server(void *arg) {
         }
 
         else if (incoming == YOUR_TURN) {
+            // it's our turn to play
             int move_played;
             recv(client_fd, &move_played, sizeof(move_played), 0);
             printf("\n>>> Le serveur a notifié que c'est votre tour de jouer.\n");
@@ -289,6 +305,7 @@ void *listen_server(void *arg) {
         }
 
         else if (incoming == GAME_OVER) {
+            // the server notifies that the game is over
             int result;
             recv(client_fd, &result, sizeof(result), 0);
             printf("\n>>> Le serveur a notifié que la partie est terminée.\n");
@@ -296,7 +313,7 @@ void *listen_server(void *arg) {
             pthread_mutex_lock(&lock_turn);
             game_over = result;
             in_game = 0;
-            // réveiller le thread jeu au cas où il attendait
+            // wake up the game thread to handle the end of the game
             pthread_cond_signal(&cond_game_turn);
             pthread_mutex_unlock(&lock_turn);
         }
@@ -313,6 +330,7 @@ void *listen_server(void *arg) {
 }
 
 void handle_incoming_challenge() {
+    // thread that handles incoming challenges
     pthread_mutex_lock(&lock);
     if (!pending_challenge) {
         pthread_mutex_unlock(&lock);
@@ -354,6 +372,7 @@ void handle_incoming_challenge() {
 
 
 int start_client() {
+    // principle thread that runs the menu and send menu choices to the server
     int client_fd;
     struct sockaddr_in serv_addr;
 

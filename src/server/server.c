@@ -62,17 +62,6 @@ void free_game(GameInstance *g) {
     free(g);
 }
 
-/*void send_your_turn(int fd) {
-    CallType ct = YOUR_TURN;
-    if (send(fd, &ct, sizeof(ct), 0) <= 0) perror("send YOUR_TURN");
-}*/
-
-/*void forward_move(int dest_fd, Move *m) {
-    CallType ct = PLAY_MADE;
-    if (send(dest_fd, &ct, sizeof(ct), 0) <= 0) perror("send PLAY_MADE");
-    if (send(dest_fd, m, sizeof(Move), 0) <= 0) perror("send Move");
-}
- */
 
 void *game_thread(void *arg) {
     GameInstance *g = (GameInstance *)arg;
