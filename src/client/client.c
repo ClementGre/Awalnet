@@ -138,7 +138,9 @@ void *play_game(void *arg) {
         }
 
         int position_of_last_put_seed = moveSeeds(game, adjusted_position);
-        me.score += collectSeedsAndCountPoints(game, position_of_last_put_seed, order);
+        int new_points = collectSeedsAndCountPoints(game, position_of_last_put_seed, order);
+        printf("Vous avez collecté %d points avec ce coup.\n", new_points);
+        me.score += new_points;
 
         // envoi au serveur
         CallType ct = PLAY_MADE;
@@ -203,9 +205,11 @@ void *listen_server(void *arg) {
             recv(client_fd, &previous_call, sizeof(int), 0);
             recv(client_fd, error_msg, sizeof(error_msg), 0);
             printf(">>> Erreur : %s\n", error_msg);
+            pthread_mutex_lock(&lock);
             switch (previous_call) {
                 case CHALLENGE:
                     // this means our challenge was not sent correctly (maybe the user id does not exist)
+                    printf(">>> Votre défi n'a pas pu être envoyé.\n");
                     sent_challenges--;
                     break;
                 case CONSULT_USER_PROFILE:
@@ -213,7 +217,7 @@ void *listen_server(void *arg) {
                     pthread_cond_signal(&cond_user_profile);
                     break;
                 case CHALLENGE_REQUEST_ANSWER:
-                    // in case of error we consider the challenge was refused (should be implemented in the future)
+                    // in case of error we consider the challenge was refused
                     break;
                 case LIST_USERS:
                     // it means we could not get the user list, so we unblock the waiting thread
@@ -223,6 +227,7 @@ void *listen_server(void *arg) {
                 default:
                     break;
             }
+            pthread_mutex_unlock(&lock);
         }
 
         else if (incoming == SUCCESS) {

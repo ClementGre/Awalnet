@@ -20,7 +20,47 @@ typedef struct {
     char username[USERNAME_SIZE + 1];
     int active;
     int in_game;
+    int nb_of_pending_challenges;
+    int *pending_challenge_from_user_fd;
 } Client;
+
+Client clients[MAX_CLIENTS];
+
+// 🧩 FIX: mutex pour protéger le tableau clients
+pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+int find_client_index_by_fd(int fd) {
+    for (int i = 0; i < MAX_CLIENTS; ++i) {
+        if (clients[i].active && clients[i].fd == fd) return i;
+    }
+    return -1;
+}
+
+void remove_client_by_index(int idx) {
+    if (idx < 0 || idx >= MAX_CLIENTS) return;
+
+    pthread_mutex_lock(&clients_mutex);
+
+    if (!clients[idx].active) {
+        pthread_mutex_unlock(&clients_mutex);
+        return;
+    }
+
+    close(clients[idx].fd);
+
+    if (clients[idx].pending_challenge_from_user_fd) {
+        free(clients[idx].pending_challenge_from_user_fd);
+        clients[idx].pending_challenge_from_user_fd = NULL;
+    }
+
+    clients[idx].active = 0;
+    clients[idx].in_game = 0;
+    clients[idx].nb_of_pending_challenges = 0;
+    clients[idx].fd = -1;
+
+    pthread_mutex_unlock(&clients_mutex);
+}
+
 
 // ---------------------- GAME LOGIC ---------------------- //
 typedef struct {
@@ -64,6 +104,7 @@ void free_game(GameInstance *g) {
 
 
 void *game_thread(void *arg) {
+    // TODO : traiter les déconnexions des joueurs -> il faut également les supprimer des clients dans le server main loop
     GameInstance *g = (GameInstance *)arg;
 
     int tours = 0;
@@ -80,11 +121,20 @@ void *game_thread(void *arg) {
         send(current_player.fd, &move_made, sizeof(move_made), 0);
         printf("Sent YOUR_TURN to player fd %d for game %d\n", current_player.fd, g->game_id);
         if (n <= 0) {
-            // client disconnected -> end game, notify opponent
             printf("Player fd %d disconnected, ending game %d\n", current_player.fd, g->game_id);
-            CallType go = GAME_OVER;
+            int idx = find_client_index_by_fd(current_player.fd);
+            if (idx != -1) remove_client_by_index(idx);
+
             int opponent_fd = (tours % 2 == 0) ? g->game->player2.fd : g->game->player1.fd;
-            send(opponent_fd, &go, sizeof(go), 0);
+            int opp_idx = find_client_index_by_fd(opponent_fd);
+            if (opp_idx != -1) {
+                pthread_mutex_lock(&clients_mutex);
+                clients[opp_idx].in_game = 0;
+                pthread_mutex_unlock(&clients_mutex);
+
+                CallType go = GAME_OVER;
+                send(opponent_fd, &go, sizeof(go), 0);
+            }
             break;
         }
 
@@ -92,10 +142,19 @@ void *game_thread(void *arg) {
         CallType incoming;
         n = recv(current_player.fd, &incoming, sizeof(incoming), 0);
         if (n <= 0) {
-            // client disconnected -> end game, notify opponent
             printf("Player fd %d disconnected, ending game %d\n", current_player.fd, g->game_id);
-            CallType go = GAME_OVER;
-            send(g->game->player2.fd, &go, sizeof(go), 0);
+            int idx = find_client_index_by_fd(current_player.fd);
+            if (idx != -1) remove_client_by_index(idx);
+            int opponent_fd = (tours % 2 == 0) ? g->game->player2.fd : g->game->player1.fd;
+            int opp_idx = find_client_index_by_fd(opponent_fd);
+            if (opp_idx != -1) {
+                pthread_mutex_lock(&clients_mutex);
+                clients[opp_idx].in_game = 0;
+                pthread_mutex_unlock(&clients_mutex);
+
+                CallType go = GAME_OVER;
+                send(opponent_fd, &go, sizeof(go), 0);
+            }
             break;
         }
 
@@ -138,6 +197,12 @@ void *game_thread(void *arg) {
             send(g->game->player1.fd, &win, sizeof(int), 0);
             send(g->game->player2.fd, &go, sizeof(go), 0);
             send(g->game->player2.fd, &lose, sizeof(int), 0);
+
+            int idx1 = find_client_index_by_fd(g->game->player1.fd);
+            int idx2 = find_client_index_by_fd(g->game->player2.fd);
+            if (idx1 != -1) { pthread_mutex_lock(&clients_mutex); clients[idx1].in_game = 0; pthread_mutex_unlock(&clients_mutex); }
+            if (idx2 != -1) { pthread_mutex_lock(&clients_mutex); clients[idx2].in_game = 0; pthread_mutex_unlock(&clients_mutex); }
+
             break;
         }
         if (g->game->player2.score == WINNING_SCORE || playerSeedsLeft(g->game, 1) < 6) {
@@ -149,6 +214,20 @@ void *game_thread(void *arg) {
             send(g->game->player1.fd, &lose, sizeof(int), 0);
             send(g->game->player2.fd, &go, sizeof(go), 0);
             send(g->game->player2.fd, &win, sizeof(int), 0);
+
+            int idx1 = find_client_index_by_fd(g->game->player1.fd);
+            int idx2 = find_client_index_by_fd(g->game->player2.fd);
+            if (idx1 != -1) {
+                pthread_mutex_lock(&clients_mutex);
+                clients[idx1].in_game = 0;
+                pthread_mutex_unlock(&clients_mutex);
+            }
+            if (idx2 != -1) {
+                pthread_mutex_lock(&clients_mutex);
+                clients[idx2].in_game = 0;
+                pthread_mutex_unlock(&clients_mutex);
+            }
+
             break;
         }
 
@@ -169,7 +248,6 @@ int start_server() {
     int addrlen = sizeof(address);
 
 
-    Client clients[MAX_CLIENTS];
     for (int i = 0; i < MAX_CLIENTS; i++) {
         clients[i].active = 0;
     }
@@ -234,6 +312,9 @@ int start_server() {
                     clients[i].fd = new_socket;
                     clients[i].active = 1;
                     clients[i].in_game = 0;
+                    clients[i].nb_of_pending_challenges = 0;
+                    // we could optimize memory by reallocating when a new challenge is received (to nb_of_pending_challenges + 1) but flemme
+                    clients[i].pending_challenge_from_user_fd = malloc(sizeof(int) * (MAX_CLIENTS - 1));
                     break;
                 }
             }
@@ -249,8 +330,8 @@ int start_server() {
             CallType call_type;
             ssize_t n = read(clients[i].fd, &call_type, sizeof(CallType));
             if (n <= 0) {
-                close(clients[i].fd);
-                clients[i].active = 0;
+                printf("Client fd %d disconnected (main loop)\n", clients[i].fd);
+                remove_client_by_index(i);
                 continue;
             }
 
@@ -295,12 +376,26 @@ int start_server() {
                         }
                     }
                     if (target != -1) {
+                        // if a player is found, send challenge request except if he is already in a game
+                        if (clients[target].in_game) {
+                            printf("User %s (id=%d) attempted to challenge user %s (id=%d) who is already in a game. Ignored.\n",
+                                   clients[i].username, clients[i].user_id, clients[target].username, clients[target].user_id);
+                            char error_msg[] = "The player challenged is currently in a game.";
+                            send(clients[i].fd, &error, sizeof(error), 0);
+                            send(clients[i].fd, &call_type, sizeof(call_type), 0);
+                            send(clients[i].fd, error_msg, sizeof(error_msg), 0);
+                            break;
+                        }
                         CallType out = CHALLENGE;
+                        clients[target].pending_challenge_from_user_fd[clients[target].nb_of_pending_challenges] = clients[i].fd;
+                        clients[target].nb_of_pending_challenges++;
+                        printf("User %s (id=%d) has %d pending challenges.\n",  clients[target].username, clients[target].user_id, clients[target].nb_of_pending_challenges);
                         send(clients[target].fd, &out, sizeof(out), 0);
                         send(clients[target].fd, &clients[i].user_id, sizeof(int), 0);
                         send(clients[target].fd, clients[i].username, USERNAME_SIZE + 1, 0);
                         printf("Challenge initialized by de %s(id=%d) to %s(id=%d) | socket %d to bind\n",
                                clients[i].username, clients[i].user_id, clients[target].username, clients[target].user_id, clients[target].fd);
+
                     } else {
                         printf("Utilisateur %d introuvable pour challenge.\n", opponent_user_id);
                         char error_msg[] = "User not found or not online.";
@@ -335,11 +430,36 @@ int start_server() {
                         }
                     }
                     if (target != -1) {
+                        // if the player that initiated the challenge is playing a game now, we cannot send the answer and have to notify the challenged that the challenge he accepted no longer exists.
+                        if (clients[target].in_game) {
+                            char error_msg[] = "The player who challenged you is now in a game.";
+                            int previous_call = CHALLENGE_REQUEST_ANSWER;
+                            send(clients[i].fd, &error, sizeof(error), 0);
+                            send(clients[i].fd, &previous_call, sizeof(previous_call), 0);
+                            send(clients[i].fd, error_msg, sizeof(error_msg), 0);
+                            break;
+                        }
+
                         CallType out = CHALLENGE_REQUEST_ANSWER;
+                        // send answer to selected challenger
                         send(clients[target].fd, &out, sizeof(out), 0);
                         send(clients[target].fd, &clients[i].user_id, sizeof(int), 0);
                         send(clients[target].fd, &answer, sizeof(int), 0);
                         if (answer == 1) {
+                            // challenge accepted -> notify awaiting challengers that were not selected
+                            for (int k = 0; k < clients[i].nb_of_pending_challenges; k++) {
+                                if (clients[i].pending_challenge_from_user_fd[k] != clients[target].fd) {
+                                    int fd_to_notify = clients[i].pending_challenge_from_user_fd[k];
+                                    CallType notify = CHALLENGE_REQUEST_ANSWER;
+                                    int refused = 0;
+                                    send(fd_to_notify, &notify, sizeof(notify), 0);
+                                    send(fd_to_notify, &clients[i].user_id, sizeof(int), 0);
+                                    send(fd_to_notify, &refused, sizeof(int), 0);
+                                    printf("Notified fd %d that challenge to %s(id=%d) was refused due to another acceptance.\n",
+                                           fd_to_notify, clients[i].username, clients[i].user_id);
+                                }
+                            }
+                            clients[target].nb_of_pending_challenges = 0;
                             printf("Challenge accepted by %s(id=%d) to %s(id=%d) | socket %d to bind\n",
                                    clients[i].username, clients[i].user_id, clients[target].username, clients[target].user_id, clients[target].fd);
                             CallType out = CHALLENGE_START;
@@ -434,7 +554,7 @@ int start_server() {
                         close(clients[i].fd); clients[i].active = 0; break;
                     }
                     if(requested_user_id == clients[i].user_id) {
-                        printf("User %s (id=%d) attempted to request their own profile. Ignored.\n",
+                        printf("User %s (id = %d) attempted to request their own profile. Ignored.\n",
                                clients[i].username, clients[i].user_id);
                         char error_msg[] = "To view your own profile, press 1.";
                         int previous_call = CONSULT_USER_PROFILE;
@@ -499,5 +619,7 @@ int start_server() {
             }
         }
     }
+    // TODO : nettoyer proprement l'espace mémoire quand le serveur s'arrête
+
     return 0;
 }

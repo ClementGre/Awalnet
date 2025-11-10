@@ -84,3 +84,6 @@ sequenceDiagram
 The game logic is implemented on the client side to ease server load. It means that the server only receives the moves and sends them to the opponent without any validation because the move validation has been done by the player sending it.
 Also, both player and client have a copy of the game board state so they can render it locally without exchanging it.
 But ultimately, it is the server who stops the game when a player wins or when there is a draw or when a player disconnects.
+
+
+When a player challenges another player, if he receives a challenge and has not answered it when the answer to his challenge arrives, it won't know he has been answered.
