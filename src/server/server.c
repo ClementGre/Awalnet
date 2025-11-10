@@ -364,6 +364,7 @@ int start_server() {
                                clients[i].username, clients[i].user_id);
                         char error_msg[] = "You cannot challenge yourself.";
                         send(clients[i].fd, &error, sizeof(error), 0);
+                        send(clients[i].fd, &call_type, sizeof(call_type), 0);
                         send(clients[i].fd, error_msg, sizeof(error_msg), 0);
                         break;
                     }

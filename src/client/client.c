@@ -209,7 +209,6 @@ void *listen_server(void *arg) {
             switch (previous_call) {
                 case CHALLENGE:
                     // this means our challenge was not sent correctly (maybe the user id does not exist)
-                    printf(">>> Votre défi n'a pas pu être envoyé.\n");
                     sent_challenges--;
                     break;
                 case CONSULT_USER_PROFILE:
