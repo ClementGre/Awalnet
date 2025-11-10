@@ -8,7 +8,7 @@
 #include <stdlib.h>
 
 
-#define MAX_ROUNDS 10
+#define MAX_ROUNDS 5
 #define MIN_SEEDS 6
 #define WINNING_SCORE 25
 

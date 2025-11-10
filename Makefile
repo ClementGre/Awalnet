@@ -5,16 +5,19 @@ CFLAGS = -ansi -pedantic -Wall -g -std=c99
 # Séparer les sources
 SRCS_COMMON = $(shell find src/common -type f -name '*.c')
 SRCS_SERVER = $(shell find src/server -type f -name '*.c')
+SRCS_MAIN := src/server/main.c
 SRCS_CLIENT = $(shell find src/client -type f -name '*.c')
 HEADS = $(shell find src -type f -name '*.h')
 
 # Objets pour chaque cible (server/client partagent common)
 OBJ_SERVER = $(patsubst src/%.c, bin/obj/%.o, $(SRCS_SERVER) $(SRCS_COMMON))
 OBJ_CLIENT = $(patsubst src/%.c, bin/obj/%.o, $(SRCS_CLIENT) $(SRCS_COMMON))
+OBJ_MAIN = $(patsubst src/%.c, bin/obj/%.o, $(SRCS_MAIN) $(SRCS_COMMON))
 
 # Exécutables
 EXE_SERVER = bin/awalnet_server
 EXE_CLIENT = bin/awalnet_client
+EXE_MAIN = bin/awalnet_main
 
 # Default target: build both
 all: build_all
@@ -27,6 +30,12 @@ $(EXE_SERVER): $(OBJ_SERVER)
 	$(CC) $(OBJ_SERVER) -o $(EXE_SERVER)
 
 build_client: $(EXE_CLIENT)
+
+$(EXE_MAIN): $(OBJ_MAIN)
+	@mkdir -p $(dir $@)
+	$(CC) $(OBJ_MAIN) -o $(EXE_MAIN)
+
+build_main: $(EXE_MAIN)
 
 $(EXE_CLIENT): $(OBJ_CLIENT)
 	@mkdir -p $(dir $@)
@@ -46,10 +55,14 @@ run_client: build_client
 	@echo "Lancement du client..."
 	$(EXE_CLIENT)
 
+run_main: build_main
+	@echo "Lancement du main..."
+	$(EXE_MAIN)
+
 # Build both in parallel
 build_all:
 	@echo "Démarrage des builds server et client en parallèle..."
-	@$(MAKE) build_server & $(MAKE) build_client & wait
+	@$(MAKE) build_server & $(MAKE) build_client & $(MAKE) build_main & wait
 	@echo "Builds terminés."
 
 # Run both in parallel (builds d'abord)

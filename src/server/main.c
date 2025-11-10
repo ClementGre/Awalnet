@@ -67,7 +67,7 @@ int main(void) {
         }
         // -------------------- PLAYER 1 ------------------------------------
         printGame(game, 1);
-        printf("SCORES :\n Player 1 %d VS Playe 2 %d\n", player1.score, player2.score);
+        printf("SCORES :\n Player 1 %d VS Player 2 %d\n", player1.score, player2.score);
         // player 1 plays
         // displays the board
         int position = 0;

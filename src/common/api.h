@@ -3,6 +3,13 @@
 #include <string.h>
 #include "model.h"
 
+typedef enum GAME_OVER_REASON {
+    WIN = 1,
+    LOSE = 2,
+    DRAW = 3,
+    OPPONENT_DISCONNECTED = 4
+} GAME_OVER_REASON;
+
 typedef enum CallType {
     CONNECT = 0, // Request Username
     LIST_USERS = 1,

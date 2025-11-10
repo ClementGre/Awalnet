@@ -26,7 +26,6 @@ typedef struct {
 
 Client clients[MAX_CLIENTS];
 
-// 🧩 FIX: mutex pour protéger le tableau clients
 pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 int find_client_index_by_fd(int fd) {
@@ -104,7 +103,6 @@ void free_game(GameInstance *g) {
 
 
 void *game_thread(void *arg) {
-    // TODO : traiter les déconnexions des joueurs -> il faut également les supprimer des clients dans le server main loop
     GameInstance *g = (GameInstance *)arg;
 
     int tours = 0;
@@ -153,7 +151,10 @@ void *game_thread(void *arg) {
                 pthread_mutex_unlock(&clients_mutex);
 
                 CallType go = GAME_OVER;
+                GAME_OVER_REASON gameOverReason = OPPONENT_DISCONNECTED;
                 send(opponent_fd, &go, sizeof(go), 0);
+                send(opponent_fd, &gameOverReason, sizeof(gameOverReason), 0);
+
             }
             break;
         }
@@ -176,44 +177,53 @@ void *game_thread(void *arg) {
         if (tours % 2 == 0) {
             // if the first player played
             int position_of_last_put_seed = moveSeeds(g->game, move_made  - 1);
-            printf("stopped on position :%d\n", position_of_last_put_seed);
-
             g->game->player1.score += collectSeedsAndCountPoints(g->game, position_of_last_put_seed, 1);
+            printf("SCORE : Player 1: %d | Player 2: %d  (game %d)\n", g->game->player1.score, g->game->player2.score, g->game_id);
         }
         else {
             // the second player made the last move
             int position_of_last_put_seed = moveSeeds(g->game, move_made + 5);
-            printf("stopped on position :%d\n", position_of_last_put_seed);
             g->game->player2.score += collectSeedsAndCountPoints(g->game, position_of_last_put_seed, 2);
+            printf("SCORE : Player 1: %d | Player 2: %d  (game %d)\n", g->game->player1.score, g->game->player2.score, g->game_id);
+
         }
 
         // then checks for win conditions
         if (g->game->player1.score == WINNING_SCORE || playerSeedsLeft(g->game, 2) < 6) {
             printf("\n---------------- PLAYER 1 WON !!! --------------\n");
-            int win = 1;
-            int lose = 0;
             CallType go = GAME_OVER;
+            GAME_OVER_REASON win = WIN;
+            GAME_OVER_REASON lose = LOSE;
             send(g->game->player1.fd, &go, sizeof(go), 0);
-            send(g->game->player1.fd, &win, sizeof(int), 0);
+            send(g->game->player1.fd, &win, sizeof(win), 0);
             send(g->game->player2.fd, &go, sizeof(go), 0);
-            send(g->game->player2.fd, &lose, sizeof(int), 0);
+            send(g->game->player2.fd, &lose, sizeof(lose), 0);
 
             int idx1 = find_client_index_by_fd(g->game->player1.fd);
             int idx2 = find_client_index_by_fd(g->game->player2.fd);
-            if (idx1 != -1) { pthread_mutex_lock(&clients_mutex); clients[idx1].in_game = 0; pthread_mutex_unlock(&clients_mutex); }
-            if (idx2 != -1) { pthread_mutex_lock(&clients_mutex); clients[idx2].in_game = 0; pthread_mutex_unlock(&clients_mutex); }
+            if (idx1 != -1) {
+                pthread_mutex_lock(&clients_mutex);
+                clients[idx1].in_game = 0;
+                pthread_mutex_unlock(&clients_mutex);
+            }
+            if (idx2 != -1) {
+                pthread_mutex_lock(&clients_mutex);
+                clients[idx2].in_game = 0;
+                pthread_mutex_unlock(&clients_mutex);
+            }
 
             break;
         }
         if (g->game->player2.score == WINNING_SCORE || playerSeedsLeft(g->game, 1) < 6) {
             printf("\n---------------- PLAYER 2 WON !!! --------------\n");
-            int win = 1;
-            int lose = 0;
+
             CallType go = GAME_OVER;
+            GAME_OVER_REASON win = WIN;
+            GAME_OVER_REASON lose = LOSE;
             send(g->game->player1.fd, &go, sizeof(go), 0);
-            send(g->game->player1.fd, &lose, sizeof(int), 0);
+            send(g->game->player1.fd, &lose, sizeof(lose), 0);
             send(g->game->player2.fd, &go, sizeof(go), 0);
-            send(g->game->player2.fd, &win, sizeof(int), 0);
+            send(g->game->player2.fd, &win, sizeof(win), 0);
 
             int idx1 = find_client_index_by_fd(g->game->player1.fd);
             int idx2 = find_client_index_by_fd(g->game->player2.fd);
@@ -234,6 +244,35 @@ void *game_thread(void *arg) {
         tours++;
 
     }
+
+    // we end the game by freeing the game instance but before that we need to set the clients as not in game anymore
+    int idx1 = find_client_index_by_fd(g->game->player1.fd);
+    int idx2 = find_client_index_by_fd(g->game->player2.fd);
+    if (idx1 != -1) {
+        pthread_mutex_lock(&clients_mutex);
+        clients[idx1].in_game = 0;
+        pthread_mutex_unlock(&clients_mutex);
+    }
+    if (idx2 != -1) {
+        pthread_mutex_lock(&clients_mutex);
+        clients[idx2].in_game = 0;
+        pthread_mutex_unlock(&clients_mutex);
+    }
+
+    // envoyer un message aux deux joueurs pour indiquer la fin de la partie
+
+    if (tours > MAX_ROUNDS) {
+        CallType go = GAME_OVER;
+        GAME_OVER_REASON gameOverReason = DRAW;
+        send(g->game->player1.fd, &go, sizeof(go), 0);
+        send(g->game->player1.fd, &gameOverReason, sizeof(gameOverReason), 0);
+        send(g->game->player2.fd, &go, sizeof(go), 0);
+        send(g->game->player2.fd, &gameOverReason, sizeof(gameOverReason), 0);
+        printf("Game %d ended in a draw due to max rounds reached\n", g->game_id);
+    }
+
+    free_game(g);
+
 
     return NULL;
 }
