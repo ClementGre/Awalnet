@@ -25,7 +25,8 @@ typedef enum CallType {
     CHALLENGE_START = 11, // Notify both clients that the challenge is starting now
     PLAY_MADE = 12, // Notify the server that a play has been made, followed by
     YOUR_TURN = 13, // Notify the client that it's their turn to play
-    GAME_OVER = 14 // Notify the client that the game is over (followed by 1 for win, 0 for lose)
+    GAME_OVER = 14, // Notify the client that the game is over (followed by GAME_OVER_REASON)
+    LIST_ONGOING_GAMES = 15 // Notify the client with the list of ongoing games
 
 } CallType;
 

@@ -14,11 +14,12 @@
 #define PORT 8080
 
 // TODO : vider les entrées lues dans le jeu pour pas qu'elles soient interprétées par le tour suivant
-// TODO : fix la logique des points qui est broken.
+// TODO : gérer le cas où l'adversaire se déconnecte en plein milieu d'une partie (le client bugue après quand il essaie de relancer une partie)
 
 pthread_cond_t cond_challenge = PTHREAD_COND_INITIALIZER;
 pthread_cond_t cond_user_profile = PTHREAD_COND_INITIALIZER;
 pthread_cond_t cond_list_users = PTHREAD_COND_INITIALIZER;
+pthread_cond_t cond_list_games = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t lock_turn = PTHREAD_MUTEX_INITIALIZER;
 
@@ -256,6 +257,14 @@ void *listen_server(void *arg) {
             pthread_cond_signal(&cond_list_users);
         }
 
+        else if (incoming == LIST_ONGOING_GAMES) {
+            // receiving the list of ongoing games
+            char games_list_buffer[1024] = {0};
+            recv(client_fd, games_list_buffer, sizeof(games_list_buffer), 0);
+            printf("Parties en cours :\n%s\n", games_list_buffer);
+            pthread_cond_signal(&cond_list_games);
+        }
+
         else if (incoming == CONSULT_USER_PROFILE) {
             // we need to sent our user profile to the server because somebody requested it
             CallType ct = SENT_USER_PROFILE;
@@ -463,7 +472,8 @@ int start_client() {
         printf(" 2 - Afficher les utilisateurs en ligne\n");
         printf(" 3 - Défier un utilisateur\n");
         printf(" 4 - Consulter le profil d'un utilisateur\n");
-        printf(" 5 - Quitter\n");
+        printf(" 5 - Afficher les parties en cours\n");
+        printf(" 6 - Quitter\n");
         printf("Votre choix: ");
 
         if (scanf("%d", &choice_input) != 1) {
@@ -533,11 +543,26 @@ int start_client() {
             pthread_cond_wait(&cond_user_profile, &lock);
             pthread_mutex_unlock(&lock);
         }
+        else if (choice_input == 2) {
+            CallType ct = LIST_USERS;
+            if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send failed");
+            pthread_mutex_lock(&lock);
+            pthread_cond_wait(&cond_list_users, &lock);
+            pthread_mutex_unlock(&lock);
+        }
 
-        else if (choice_input == 5) {
+        else if (choice_input == 6) {
             close(client_fd);
             printf("Déconnecté.\n");
             exit(EXIT_SUCCESS);
+        }
+
+        else if (choice_input == 5) {
+            CallType ct = LIST_ONGOING_GAMES;
+            if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send failed");
+            pthread_mutex_lock(&lock);
+            pthread_cond_wait(&cond_list_games, &lock);
+            pthread_mutex_unlock(&lock);
         }
 
         else {

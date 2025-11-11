@@ -69,6 +69,15 @@ Challenged->>Server: CHALLENGE_REQUEST_ANSWER notification (ACCEPT or REJECT)
 Server->>Challenger: CHALLENGE_REQUEST_ANSWER notification
 ```
 
+A player cannot challenge multiple players at the same time. This rule is applied on the client side.
+
+A challenged player can be challenged by multiple players at the same time. The server will forward all the challenges to the challenged player. For now, the challenged player can only send an answer to the last received challenge. If he accepts it, the other pending challenges will be answered as refused.
+
+A player cannot challenge another player who is already in a game. The server will refuse the challenge request in this case.
+
+When a player challenges another player, if he receives a challenge afterward, while he is waiting for an answer to his challenge, and he accepts it, the server will consider that he canceled his previous challenge and notify the challenged (if he had accepted the challenge).
+
+
 ### GAME MODE - GAME LOOP
 ```mermaid
 sequenceDiagram
@@ -106,7 +115,9 @@ When a player challenges another player, if he receives a challenge and has not 
 
 ✅ If you have a working version for one game, ensure it also works for multiple simultaneous games. 
 
-❌ You can add features such as listing ongoing games and an “observer” mode where the server sends the board and score to C who observes the game between A and B.
+✅ You can add features such as listing ongoing games 
+
+❌ and an “observer” mode where the server sends the board and score to C who observes the game between A and B.
 
 ❌ Implement a chat option, in addition to sending moves, players can exchange messages to chat (both inside and outside a game).
 

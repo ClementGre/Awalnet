@@ -569,11 +569,14 @@ int start_server() {
                     for (int u = 0; u < MAX_CLIENTS; u++) {
                         if (clients[u].active && clients[u].user_id != 0 && clients[u].fd != clients[i].fd) {
                             strcat(user_list_buffer, clients[u].username);
-                            strcat(user_list_buffer, " (id=");
+                            strcat(user_list_buffer, " (id = ");
                             char id_str[12];
                             sprintf(id_str, "%d", clients[u].user_id);
                             strcat(user_list_buffer, id_str);
                             strcat(user_list_buffer, ")");
+                            if (clients[u].in_game) {
+                                strcat(user_list_buffer, " [IN GAME]");
+                            }
                             strcat(user_list_buffer, "\n");
                             client_count++;
                         }
@@ -584,6 +587,31 @@ int start_server() {
                         strcat(user_list_buffer, "No other users online.\n");
                     }
                     send(clients[i].fd, user_list_buffer, strlen(user_list_buffer) + 1, 0);
+                    break;
+                }
+                case LIST_ONGOING_GAMES: {
+                    CallType out = LIST_ONGOING_GAMES;
+                    char games_list_buffer[1024] = {0};
+                    int games_count = 0;
+                    for (int u = 0; u < next_game_id; u++) {
+                        if (games[u] != NULL) {
+                            char game_info[128];
+                            sprintf(game_info, "Game %d: %d VS %d | %d - %d\n",
+                                    games[u]->game_id,
+                                    games[u]->game->player1.user_id,
+                                    games[u]->game->player2.user_id,
+                                    games[u]->game->player1.score,
+                                    games[u]->game->player2.score);
+                            strcat(games_list_buffer, game_info);
+                            games_count++;
+                        }
+                    }
+                    printf("Sending games list to %s (id=%d)\n", clients[i].username, clients[i].user_id);
+                    send(clients[i].fd, &out, sizeof(out), 0);
+                    if (games_count == 0) {
+                        strcat(games_list_buffer, "No games are being played\n");
+                    }
+                    send(clients[i].fd, games_list_buffer, strlen(games_list_buffer) + 1, 0);
                     break;
                 }
                 case CONSULT_USER_PROFILE: {
