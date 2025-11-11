@@ -104,7 +104,7 @@ When a player challenges another player, if he receives a challenge and has not 
 
 ❌ The server verifies the legality of moves (using the code created in step 0).
 
-❌ If you have a working version for one game, ensure it also works for multiple simultaneous games. 
+✅ If you have a working version for one game, ensure it also works for multiple simultaneous games. 
 
 ❌ You can add features such as listing ongoing games and an “observer” mode where the server sends the board and score to C who observes the game between A and B.
 

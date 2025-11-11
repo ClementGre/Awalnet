@@ -67,7 +67,6 @@ void *play_game(void *arg) {
 
         if (game_over != -1) {
             GAME_OVER_REASON reason = game_over;
-            pthread_mutex_unlock(&lock_turn);
 
             if (reason == WIN) {
                 printf("\n>>> Vous avez gagné la partie ! Félicitations !\n");
@@ -84,15 +83,12 @@ void *play_game(void *arg) {
             }
             user.total_games++;
 
-            pthread_mutex_lock(&lock_turn);
             in_game = 0;
             last_move = -1;
             game_over = -1;
             free(game);
             game = NULL;
-            pthread_mutex_unlock(&lock_turn);
 
-            pthread_mutex_lock(&lock);
             pthread_cond_signal(&cond_game);
             pthread_mutex_unlock(&lock);
 
@@ -173,9 +169,6 @@ void *play_game(void *arg) {
         printf("en attente de l'adversaire ...\n");
 
     }
-    pthread_mutex_lock(&lock);
-    pthread_cond_signal(&cond_game);
-    pthread_mutex_unlock(&lock);
     return NULL;
 }
 
@@ -335,6 +328,7 @@ void *listen_server(void *arg) {
             printf("\n>>> Le serveur a notifié que la partie est terminée.\n");
             pthread_mutex_lock(&lock_turn);
             game_over = reason;
+            your_turn = 1;
             // wake up the game thread to handle the end of the game
             pthread_cond_signal(&cond_game_turn);
             pthread_mutex_unlock(&lock_turn);
