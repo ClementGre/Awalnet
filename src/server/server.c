@@ -60,6 +60,30 @@ void remove_client_by_index(int idx) {
     pthread_mutex_unlock(&clients_mutex);
 }
 
+size_t send_payload(CallType calltype, u_int8_t *payload, size_t payload_size, int fd) {
+    send(fd, &calltype, sizeof(calltype), 0);
+    send(fd, &payload_size, sizeof(int), 0);
+    return send(fd, payload, payload_size, 0);
+
+}
+
+size_t  end_error(CallType calltype, const char *error_msg, int fd) {
+
+    size_t msg_len = strlen(error_msg) + 1;
+    size_t total_size = sizeof(CallType) + msg_len;
+
+    uint8_t buffer[total_size];
+
+    // Copie du calltype d’origine
+    memcpy(buffer, &calltype, sizeof(CallType));
+
+    // Copie du message d’erreur juste après
+    memcpy(buffer + sizeof(CallType), error_msg, msg_len);
+
+    return send_payload(ERROR, buffer, total_size, fd);
+
+}
+
 
 // ---------------------- GAME LOGIC ---------------------- //
 typedef struct {
@@ -102,6 +126,7 @@ void free_game(GameInstance *g) {
 }
 
 
+
 void *game_thread(void *arg) {
     GameInstance *g = (GameInstance *)arg;
 
@@ -114,9 +139,10 @@ void *game_thread(void *arg) {
         // FIRST NOTIFY THE CURRENT PLAYER IT'S THEIR TURN
         Player current_player = (tours % 2 == 0) ? g->game->player1 : g->game->player2;
         CallType your_turn = YOUR_TURN;
-        n = send(current_player.fd, &your_turn, sizeof(your_turn), 0);
+        //n = send(current_player.fd, &your_turn, sizeof(your_turn), 0);
         // the first player will receive the number - 1 indicating that he is the first to play, the second will receive any positive number
-        send(current_player.fd, &move_made, sizeof(move_made), 0);
+        //send(current_player.fd, &move_made, sizeof(move_made), 0);
+        n = send_payload(your_turn, move_made, sizeof(move_made), current_player.fd);
         printf("Sent YOUR_TURN to player fd %d for game %d\n", current_player.fd, g->game_id);
         if (n <= 0) {
             printf("Player fd %d disconnected, ending game %d\n", current_player.fd, g->game_id);
@@ -131,7 +157,9 @@ void *game_thread(void *arg) {
                 pthread_mutex_unlock(&clients_mutex);
 
                 CallType go = GAME_OVER;
-                send(opponent_fd, &go, sizeof(go), 0);
+                GAME_OVER_REASON gameOverReason = OPPONENT_DISCONNECTED;
+                send_payload(go, &gameOverReason, sizeof(gameOverReason), opponent_fd);
+                //send(opponent_fd, &go, sizeof(go), 0);
             }
             break;
         }
@@ -152,8 +180,9 @@ void *game_thread(void *arg) {
 
                 CallType go = GAME_OVER;
                 GAME_OVER_REASON gameOverReason = OPPONENT_DISCONNECTED;
-                send(opponent_fd, &go, sizeof(go), 0);
-                send(opponent_fd, &gameOverReason, sizeof(gameOverReason), 0);
+                send_payload(go, &gameOverReason, sizeof(gameOverReason), opponent_fd);
+                /*send(opponent_fd, &go, sizeof(go), 0);
+                send(opponent_fd, &gameOverReason, sizeof(gameOverReason), 0);*/
 
             }
             break;
@@ -194,10 +223,12 @@ void *game_thread(void *arg) {
             CallType go = GAME_OVER;
             GAME_OVER_REASON win = WIN;
             GAME_OVER_REASON lose = LOSE;
-            send(g->game->player1.fd, &go, sizeof(go), 0);
+            send_payload(go, &win, sizeof(win), g->game->player1.fd);
+            send_payload(go, &lose, sizeof(lose), g->game->player2.fd);
+            /*send(g->game->player1.fd, &go, sizeof(go), 0);
             send(g->game->player1.fd, &win, sizeof(win), 0);
             send(g->game->player2.fd, &go, sizeof(go), 0);
-            send(g->game->player2.fd, &lose, sizeof(lose), 0);
+            send(g->game->player2.fd, &lose, sizeof(lose), 0);*/
 
             int idx1 = find_client_index_by_fd(g->game->player1.fd);
             int idx2 = find_client_index_by_fd(g->game->player2.fd);
@@ -220,10 +251,12 @@ void *game_thread(void *arg) {
             CallType go = GAME_OVER;
             GAME_OVER_REASON win = WIN;
             GAME_OVER_REASON lose = LOSE;
-            send(g->game->player1.fd, &go, sizeof(go), 0);
+            send_payload(go, &lose, sizeof(lose), g->game->player1.fd);
+            send_payload(go, &win, sizeof(win), g->game->player2.fd);
+            /*send(g->game->player1.fd, &go, sizeof(go), 0);
             send(g->game->player1.fd, &lose, sizeof(lose), 0);
             send(g->game->player2.fd, &go, sizeof(go), 0);
-            send(g->game->player2.fd, &win, sizeof(win), 0);
+            send(g->game->player2.fd, &win, sizeof(win), 0);*/
 
             break;
         }
@@ -251,10 +284,13 @@ void *game_thread(void *arg) {
     if (tours > MAX_ROUNDS) {
         CallType go = GAME_OVER;
         GAME_OVER_REASON gameOverReason = DRAW;
+        send_payload(go, &gameOverReason, sizeof(gameOverReason), g->game->player1.fd);
+        send_payload(go, &gameOverReason, sizeof(gameOverReason), g->game->player2.fd);
+        /*
         send(g->game->player1.fd, &go, sizeof(go), 0);
         send(g->game->player1.fd, &gameOverReason, sizeof(gameOverReason), 0);
         send(g->game->player2.fd, &go, sizeof(go), 0);
-        send(g->game->player2.fd, &gameOverReason, sizeof(gameOverReason), 0);
+        send(g->game->player2.fd, &gameOverReason, sizeof(gameOverReason), 0);*/
         printf("Game %d ended in a draw due to max rounds reached\n", g->game_id);
     }
 
@@ -266,29 +302,6 @@ void *game_thread(void *arg) {
 
 // ---------------------- GAME LOGIC ---------------------- //
 
-void send_payload(CallType calltype, u_int8_t *payload, size_t payload_size, int fd) {
-    send(fd, &calltype, sizeof(calltype), 0);
-    send(fd, &payload_size, sizeof(int), 0);
-    send(fd, payload, payload_size, 0);
-
-}
-
-void send_error(CallType calltype, const char *error_msg, int fd) {
-
-    size_t msg_len = strlen(error_msg) + 1; // +1 pour le '\0'
-    size_t total_size = sizeof(CallType) + msg_len;
-
-    uint8_t buffer[total_size];
-
-    // Copie du calltype d’origine (par ex. LOGIN, PING, etc.)
-    memcpy(buffer, &calltype, sizeof(CallType));
-
-    // Copie du message d’erreur juste après
-    memcpy(buffer + sizeof(CallType), error_msg, msg_len);
-
-    send_payload(ERROR, buffer, total_size, fd);
-
-}
 
 int start_server(void) {
     printf("🚀 Starting Awalnet server...\n");
@@ -415,9 +428,10 @@ int start_server(void) {
                         printf("User %s (id=%d) attempted to challenge themselves. Ignored.\n",
                                clients[i].username, clients[i].user_id);
                         char error_msg[] = "You cannot challenge yourself.";
-                        send(clients[i].fd, &error, sizeof(error), 0);
+                        send_error(call_type, error_msg, clients[i].fd);
+                        /*send(clients[i].fd, &error, sizeof(error), 0);
                         send(clients[i].fd, &call_type, sizeof(call_type), 0);
-                        send(clients[i].fd, error_msg, sizeof(error_msg), 0);
+                        send(clients[i].fd, error_msg, sizeof(error_msg), 0);*/
                         break;
                     }
                     // Find target client by user_id and send challenge
@@ -434,18 +448,24 @@ int start_server(void) {
                             printf("User %s (id=%d) attempted to challenge user %s (id=%d) who is already in a game. Ignored.\n",
                                    clients[i].username, clients[i].user_id, clients[target].username, clients[target].user_id);
                             char error_msg[] = "The player challenged is currently in a game.";
-                            send(clients[i].fd, &error, sizeof(error), 0);
+                            send_error(call_type, error_msg, clients[i].fd);
+                            /*send(clients[i].fd, &error, sizeof(error), 0);
                             send(clients[i].fd, &call_type, sizeof(call_type), 0);
-                            send(clients[i].fd, error_msg, sizeof(error_msg), 0);
+                            send(clients[i].fd, error_msg, sizeof(error_msg), 0);*/
                             break;
                         }
                         CallType out = CHALLENGE;
                         clients[target].pending_challenge_from_user_fd[clients[target].nb_of_pending_challenges] = clients[i].fd;
                         clients[target].nb_of_pending_challenges++;
                         printf("User %s (id=%d) has %d pending challenges.\n",  clients[target].username, clients[target].user_id, clients[target].nb_of_pending_challenges);
-                        send(clients[target].fd, &out, sizeof(out), 0);
+                        // we need to send the info in a buffer like this:
+                        uint8_t buffer[sizeof(int) + USERNAME_SIZE + 1];
+                        memcpy(buffer, &clients[i].user_id, sizeof(int));
+                        memcpy(buffer + sizeof(int), clients[i].username, USERNAME_SIZE + 1);
+                        send_payload(out, buffer, sizeof(buffer), clients[target].fd);
+                        /*send(clients[target].fd, &out, sizeof(out), 0);
                         send(clients[target].fd, &clients[i].user_id, sizeof(int), 0);
-                        send(clients[target].fd, clients[i].username, USERNAME_SIZE + 1, 0);
+                        send(clients[target].fd, clients[i].username, USERNAME_SIZE + 1, 0);*/
                         printf("Challenge initialized by de %s(id=%d) to %s(id=%d) | socket %d to bind\n",
                                clients[i].username, clients[i].user_id, clients[target].username, clients[target].user_id, clients[target].fd);
 
@@ -453,9 +473,12 @@ int start_server(void) {
                         printf("Utilisateur %d introuvable pour challenge.\n", opponent_user_id);
                         char error_msg[] = "User not found or not online.";
                         int previous_call = CHALLENGE;
+                        send_error(previous_call, error_msg, clients[i].fd);
+                        /*
                         send(clients[i].fd, &error, sizeof(error), 0);
                         send(clients[i].fd, &previous_call, sizeof (previous_call), 0);
                         send(clients[i].fd, error_msg, sizeof(error_msg), 0);
+                        */
                     }
                     break;
                 }
@@ -487,17 +510,27 @@ int start_server(void) {
                         if (clients[target].in_game) {
                             char error_msg[] = "The player who challenged you is now in a game.";
                             int previous_call = CHALLENGE_REQUEST_ANSWER;
+                            send_error(previous_call, error_msg, clients[i].fd);
+                            /*
                             send(clients[i].fd, &error, sizeof(error), 0);
                             send(clients[i].fd, &previous_call, sizeof(previous_call), 0);
                             send(clients[i].fd, error_msg, sizeof(error_msg), 0);
+                             */
                             break;
                         }
 
                         CallType out = CHALLENGE_REQUEST_ANSWER;
                         // send answer to selected challenger
+                        // store in a buffer the user_id of the challenged and the answer
+                        uint8_t buffer[sizeof(int) + sizeof(int)];
+                        memcpy(buffer, &clients[i].user_id, sizeof(int));
+                        memcpy(buffer + sizeof(int), &answer, sizeof(int));
+                        send_payload(out, buffer, sizeof(buffer), clients[target].fd);
+                        /*
                         send(clients[target].fd, &out, sizeof(out), 0);
                         send(clients[target].fd, &clients[i].user_id, sizeof(int), 0);
                         send(clients[target].fd, &answer, sizeof(int), 0);
+                         */
                         if (answer == 1) {
                             // challenge accepted -> notify awaiting challengers that were not selected
                             for (int k = 0; k < clients[i].nb_of_pending_challenges; k++) {
@@ -505,9 +538,16 @@ int start_server(void) {
                                     int fd_to_notify = clients[i].pending_challenge_from_user_fd[k];
                                     CallType notify = CHALLENGE_REQUEST_ANSWER;
                                     int refused = 0;
+                                    // store in a buffer the user_id of the challenged and the refusal
+                                    uint8_t buffer2[sizeof(int) + sizeof(int)];
+                                    memcpy(buffer2, &clients[i].user_id, sizeof(int));
+                                    memcpy(buffer2 + sizeof(int), &refused, sizeof(int));
+                                    send_payload(notify, buffer2, sizeof(buffer2), fd_to_notify);
+                                    /*
                                     send(fd_to_notify, &notify, sizeof(notify), 0);
                                     send(fd_to_notify, &clients[i].user_id, sizeof(int), 0);
                                     send(fd_to_notify, &refused, sizeof(int), 0);
+                                     */
                                     printf("Notified fd %d that challenge to %s(id=%d) was refused due to another acceptance.\n",
                                            fd_to_notify, clients[i].username, clients[i].user_id);
                                 }
@@ -517,10 +557,16 @@ int start_server(void) {
                                    clients[i].username, clients[i].user_id, clients[target].username, clients[target].user_id, clients[target].fd);
                             CallType out = CHALLENGE_START;
                             // notify both clients that the challenge is starting now
-                            send(clients[i].fd, &out, sizeof(out), 0);
+                            send_payload(out, clients[target].username, sizeof(clients[target].username), clients[i].fd);
+
+                            /*send(clients[i].fd, &out, sizeof(out), 0);
                             send(clients[i].fd, &clients[target].username, sizeof(clients[target].username), 0);
-                            send(clients[target].fd, &out, sizeof(out), 0);
+                             */
+
+                            send_payload(out, clients[i].username, sizeof(clients[i].username), clients[target].fd);
+                            /*send(clients[target].fd, &out, sizeof(out), 0);
                             send(clients[target].fd, &clients[i].username, sizeof(clients[i].username), 0);
+                             */
 
                             // then mark both clients as in game
                             clients[i].in_game = 1;
@@ -569,9 +615,12 @@ int start_server(void) {
                         printf("Utilisateur %d introuvable pour challenge.\n", request_user_id);
                         char error_msg[] = "User not found or not online.";
                         int previous_call = CHALLENGE_REQUEST_ANSWER;
+                        send_error(previous_call, error_msg, clients[i].fd);
+                        /*
                         send(clients[i].fd, &error, sizeof(error), 0);
                         send(clients[i].fd, &previous_call, sizeof (previous_call), 0);
                         send(clients[i].fd, error_msg, sizeof(error_msg), 0);
+                         */
                     }
                     break;
                 }
@@ -595,11 +644,14 @@ int start_server(void) {
                         }
                     }
                     printf("Sending user list to %s (id=%d)\n", clients[i].username, clients[i].user_id);
-                    send(clients[i].fd, &out, sizeof(out), 0);
                     if (client_count == 0) {
                         strcat(user_list_buffer, "No other users online.\n");
                     }
+                    send_payload(out, user_list_buffer, strlen(user_list_buffer) + 1, clients[i].fd);
+                    /*
+                    send(clients[i].fd, &out, sizeof(out), 0);
                     send(clients[i].fd, user_list_buffer, strlen(user_list_buffer) + 1, 0);
+                     */
                     break;
                 }
                 case LIST_ONGOING_GAMES: {
@@ -620,11 +672,13 @@ int start_server(void) {
                         }
                     }
                     printf("Sending games list to %s (id=%d)\n", clients[i].username, clients[i].user_id);
-                    send(clients[i].fd, &out, sizeof(out), 0);
                     if (games_count == 0) {
                         strcat(games_list_buffer, "No games are being played\n");
                     }
+                    send_payload(out, games_list_buffer, strlen(games_list_buffer) + 1, clients[i].fd);
+                    /*send(clients[i].fd, &out, sizeof(out), 0);
                     send(clients[i].fd, games_list_buffer, strlen(games_list_buffer) + 1, 0);
+                     */
                     break;
                 }
                 case CONSULT_USER_PROFILE: {
@@ -639,9 +693,13 @@ int start_server(void) {
                                clients[i].username, clients[i].user_id);
                         char error_msg[] = "To view your own profile, press 1.";
                         int previous_call = CONSULT_USER_PROFILE;
+
+                        send_error(previous_call, error_msg, clients[i].fd);
+                        /*
                         send(clients[i].fd, &error, sizeof(error), 0);
                         send(clients[i].fd, &previous_call, sizeof (previous_call), 0);
                         send(clients[i].fd, error_msg, sizeof(error_msg), 0);
+                         */
                         break;
                     }
                     // Find target client by user_id and send them the request to send their profile
@@ -653,17 +711,23 @@ int start_server(void) {
                         }
                     }
                     if (target != -1) {
+                        send_payload(out, &clients[i].user_id, sizeof(int), clients[target].fd);
+                        /*
                         send(clients[target].fd, &out, sizeof(out), 0);
                         send(clients[target].fd, &clients[i].user_id, sizeof(int), 0);
+                         */
                         printf("Request profile initialized by de %s(id=%d) to %s(id=%d) | socket %d to bind\n",
                                clients[i].username, clients[i].user_id, clients[target].username, clients[target].user_id, clients[target].fd);
                     } else {
                         printf("Utilisateur %d does not exist -> cannot send his profile\n", requested_user_id);
                         char error_msg[] = "User not found or not online.";
                         int previous_call = CONSULT_USER_PROFILE;
+                        send_error(previous_call, error_msg, clients[i].fd);
+                        /*
                         send(clients[i].fd, &error, sizeof(error), 0);
                         send(clients[i].fd, &previous_call, sizeof (previous_call), 0);
                         send(clients[i].fd, error_msg, sizeof(error_msg), 0);
+                         */
                     }
                     break;
                 }
@@ -692,8 +756,11 @@ int start_server(void) {
                         }
                     }
                     printf("Sending %s's profile to %s\n", clients[i].username, clients[target].username);
+                    send_payload(out, buffer, sizeof(buffer), clients[target].fd);
+                    /*
                     send(clients[target].fd, &out, sizeof(out), 0);
                     send(clients[target].fd, buffer, sizeof(buffer), 0);
+                     */
                     break;
                 }
                 case WATCH_GAME: {
@@ -705,7 +772,7 @@ int start_server(void) {
                     }
                     printf("Client %d wants to watch game %d\n", clients[i].user_id, game_id);
                     // then fetch players in the game and asks them to allow or not
-                    send(clients[i].fd, &out, sizeof(out), 0);
+                    //send(clients[i].fd, &out, sizeof(out), 0);
                     break;
                 }
                 default: break;
