@@ -26,9 +26,20 @@ typedef enum CallType {
     PLAY_MADE = 12, // Notify the server that a play has been made, followed by
     YOUR_TURN = 13, // Notify the client that it's their turn to play
     GAME_OVER = 14, // Notify the client that the game is over (followed by GAME_OVER_REASON)
-    LIST_ONGOING_GAMES = 15 // Notify the client with the list of ongoing games
+    LIST_ONGOING_GAMES = 15, // Notify the client with the list of ongoing games
+    WATCH_GAME = 16, // Request ongoing game to watch
+    ALLOW_CLIENT_TO_WATCH = 17 // Both players in a game have to answer that call when somebody wants to watch their game
 
 } CallType;
+
+// Returns the size of a CallType payload, excluding the CallType itself.
+size_t sizeof_CallType(CallType type);
+// Returns true if the CallType is made to send from the client to the server
+int is_server_CallType(CallType type);
+// Returns true if the CallType is made to be sent from the server to the client, and processed in an async way
+int is_client_async_CallType(CallType type);
+// Returns true if the CallType is made to be sent from the server to the client, and processed as an interruption
+int is_client_sync_CallType(CallType type);
 
 // Maybe we could use those error codes to be more specific about what went wrong during a challenge request
 typedef  enum ERROR_CODE {
@@ -41,28 +52,6 @@ typedef  enum ERROR_CODE {
 
 
 // Serialize User struct into a byte buffer
-void serialize_User(User *user, uint8_t *buffer) {
-    memcpy(buffer, user->username, sizeof(user->username));
-    memcpy(buffer + sizeof(user->username), &user->id, sizeof(user->id));
-    // Serialize bio as a string preceded by its length
-    int bio_len = strlen(user->bio);
-    memcpy(buffer + sizeof(user->username) + sizeof(user->id), &bio_len, sizeof(bio_len));
-    memcpy(buffer + sizeof(user->username) + sizeof(user->id) + sizeof(bio_len), user->bio, bio_len);
-    memcpy(buffer + sizeof(user->username) + sizeof(user->id) + sizeof(bio_len) + bio_len, &user->total_score, sizeof(user->total_score));
-    memcpy(buffer + sizeof(user->username) + sizeof(user->id) + sizeof(bio_len) + bio_len + sizeof(user->total_score), &user->total_games, sizeof(user->total_games));
-    memcpy(buffer + sizeof(user->username) + sizeof(user->id) + sizeof(bio_len) + bio_len + sizeof(user->total_score) + sizeof(user->total_games), &user->total_wins, sizeof(user->total_wins));
-}
-
+void serialize_User(User *user, uint8_t *buffer);
 // Deserialize a byte buffer into User struct
-void deserialize_User(uint8_t *buffer, User *user) {
-    memcpy(user->username, buffer, sizeof(user->username));
-    memcpy(&user->id, buffer + sizeof(user->username), sizeof(user->id));
-    int bio_len;
-    memcpy(&bio_len, buffer + sizeof(user->username) + sizeof(user->id), sizeof(bio_len));
-    user->bio = malloc(bio_len + 1);
-    memcpy(user->bio, buffer + sizeof(user->username) + sizeof(user->id) + sizeof(bio_len), bio_len);
-    user->bio[bio_len] = '\0';
-    memcpy(&user->total_score, buffer + sizeof(user->username) + sizeof(user->id) + sizeof(bio_len) + bio_len, sizeof(user->total_score));
-    memcpy(&user->total_games, buffer + sizeof(user->username) + sizeof(user->id) + sizeof(bio_len) + bio_len + sizeof(user->total_score), sizeof(user->total_games));
-    memcpy(&user->total_wins, buffer + sizeof(user->username) + sizeof(user->id) + sizeof(bio_len) + bio_len + sizeof(user->total_score) + sizeof(user->total_games), sizeof(user->total_wins));
-}
+void deserialize_User(uint8_t *buffer, User *user);

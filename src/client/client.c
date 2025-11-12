@@ -8,423 +8,221 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include "client.h"
+#include "cligui.h"
 #include "../common/api.h"
 #include "../common/model.h"
+#include "../common/utils.h"
 
-#define PORT 8080
+// Global client state
+static int client_fd = -1;
+static pthread_t network_thread;
 
-// TODO : vider les entrées lues dans le jeu pour pas qu'elles soient interprétées par le tour suivant
-// TODO : gérer le cas où l'adversaire se déconnecte en plein milieu d'une partie (le client bugue après quand il essaie de relancer une partie)
+// Network message handling
+static int incoming_available = 0;
+static CallType incoming_call_type;
+static uint8_t *incoming_payload;
+static pthread_mutex_t incoming_lock = PTHREAD_MUTEX_INITIALIZER;
 
-pthread_cond_t cond_challenge = PTHREAD_COND_INITIALIZER;
-pthread_cond_t cond_user_profile = PTHREAD_COND_INITIALIZER;
-pthread_cond_t cond_list_users = PTHREAD_COND_INITIALIZER;
-pthread_cond_t cond_list_games = PTHREAD_COND_INITIALIZER;
-pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t lock_turn = PTHREAD_MUTEX_INITIALIZER;
-
-User user;
-
-// challenge variables (challenge received)
-int pending_challenge = 0;
-int challenger_id_global = -1;
-char challenger_username_global[USERNAME_SIZE + 1] = {0};
-int client_fd_global;
-
-// challenge variables (sent)
-int sent_challenges = 0;
-
-// ongoing game variables
-pthread_cond_t cond_game = PTHREAD_COND_INITIALIZER;
-pthread_cond_t cond_game_turn = PTHREAD_COND_INITIALIZER;
-
-int in_game = 0;
-int last_move = -1;
-int your_turn = 0;
-int game_over = -1;
-Game *game = NULL;
-
-// selected input in the terminal
-int choice_input = -1;
-
-void clear_terminal() {
-    printf("\033[2J\033[H"); // efface l’écran et remet le curseur en haut
-    fflush(stdout);
+static void network_error(void) {
+    printf("Erreur: Connexion au serveur perdue.\n");
+    exit(EXIT_FAILURE);
 }
 
-void *play_game(void *arg) {
-    int client_fd = *(int *)arg;
-    free(arg);
+void *listen_server(void *arg);
+void process_sync_call(CallType type, char* payload);
 
-    Player me = newPlayer(user.id, client_fd);
-    Player opponent = newPlayer(-1, -1);
-    int order = 0;
-
-    while (1) {
-        pthread_mutex_lock(&lock_turn);
-        while (!your_turn) {
-            pthread_cond_wait(&cond_game_turn, &lock_turn);
-        }
-
-        if (game_over != -1) {
-            GAME_OVER_REASON reason = game_over;
-
-            if (reason == WIN) {
-                printf("\n>>> Vous avez gagné la partie ! Félicitations !\n");
-                user.total_wins++;
-            }
-            else if (reason == LOSE){
-                printf("\n>>> Vous avez perdu la partie.\n");
-            }
-            else if (reason == DRAW) {
-                printf("\n>>> La partie s'est terminée par un match nul.\n");
-            }
-            else if (reason == OPPONENT_DISCONNECTED) {
-                printf("\n>>> Votre adversaire s'est déconnecté. Vous gagnez la partie par forfait !\n");
-            }
-            user.total_games++;
-
-            in_game = 0;
-            last_move = -1;
-            game_over = -1;
-            free(game);
-            game = NULL;
-
-            pthread_cond_signal(&cond_game);
-            pthread_mutex_unlock(&lock);
-
-            return NULL;
-        }
-
-
-        int move_played = last_move;
-        if (game == NULL) {
-            if (move_played == -1) {
-                game = newGame(&me, &opponent);
-                order = 1;
-            } else {
-                game = newGame(&opponent, &me);
-                order = 2;
-            }
-            printf("\n>>> La partie commence ! Vous êtes le joueur %d.\n", order);
-        }
-
-        // copier localement puis unlock pour faire I/O
-        pthread_mutex_unlock(&lock_turn);
-
-        // appliquer le dernier coup si présent
-        if (move_played != -1) {
-            printf("Le dernier coup joué par votre adversaire était la position %d.\n", move_played);
-            int opponent_order = (order == 1) ? 2 : 1;
-            int adjusted_position = (opponent_order == 2) ? move_played + 5 : move_played - 1;
-            int position_of_last_put_seed = moveSeeds(game, adjusted_position);
-            int new_points = collectSeedsAndCountPoints(game, position_of_last_put_seed, opponent_order);
-            opponent.score += new_points;
-        } else {
-            printf("Vous êtes le premier à jouer.\n");
-        }
-
-        printGame(game, order);
-        printf("    SCORE : p1 : %d | p2 : %d\n", me.score, opponent.score);
-
-
-        // lecture utilisateur : utiliser fgets pour éviter conflit scanf, stocker dans variable locale
-        char input_buf[32];
-        int local_choice = -1;
-
-        while (1) {
-            printf("ENTREZ UNE POSITION DE CASE POUR DÉPLACER LES GRAINES (1-6) : ");
-            if (fgets(input_buf, sizeof(input_buf), stdin) == NULL) {
-                clearerr(stdin);
-                continue;
-            }
-            if (sscanf(input_buf, "%d", &local_choice) != 1) continue;
-            if (local_choice >= 1 && local_choice <= 6) break;
-        }
-
-        int adjusted_position = (order == 1) ? local_choice - 1 : local_choice + 5;
-        while (game->board[adjusted_position] == 0) {
-            printf("Pas de graines dans cette case. Choisissez une autre case.\n");
-            if (fgets(input_buf, sizeof(input_buf), stdin) == NULL) { clearerr(stdin); continue; }
-            if (sscanf(input_buf, "%d", &local_choice) != 1) continue;
-            adjusted_position = (order == 1) ? local_choice - 1 : local_choice + 5;
-        }
-
-        int position_of_last_put_seed = moveSeeds(game, adjusted_position);
-        int new_points = collectSeedsAndCountPoints(game, position_of_last_put_seed, order);
-        printf("Vous avez collecté %d points avec ce coup.\n", new_points);
-        me.score += new_points;
-
-        // envoi au serveur
-        CallType ct = PLAY_MADE;
-        if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send ct");
-        // we send the local choice to the server, which then has to convert it
-        if (send(client_fd, &local_choice, sizeof(local_choice), 0) <= 0) perror("send choice");
-        your_turn = 0;
-
-        printf("\n>>> Coup joué : position %d envoyée au serveur.\n", local_choice);
-        printf("Nouveau board : \n");
-        printGame(game, order);
-        printf("    SCORE : p1 : %d | p2 : %d\n", me.score, opponent.score);
-
-        printf("en attente de l'adversaire ...\n");
-
-    }
-    return NULL;
-}
-
-void *listen_server(void *arg) {
-    // this thread listens to incoming messages from the server
-    int client_fd = *(int *)arg;
-    CallType incoming;
-
-    while (1) {
-        ssize_t n = recv(client_fd, &incoming, sizeof(incoming), 0);
-        if (n <= 0) {
-            printf("Connexion au serveur perdue.\n");
-            exit(EXIT_FAILURE);
-        }
-
-        if (incoming == CHALLENGE) {
-            // if a challenge is received
-            pthread_mutex_lock(&lock);
-            recv(client_fd, &challenger_id_global, sizeof(int), 0);
-            recv(client_fd, challenger_username_global, USERNAME_SIZE + 1, 0);
-            printf("\n>>> Défi reçu de %s (id=%d)\n", challenger_username_global, challenger_id_global);
-            printf("Accepter le défi ? (1 = Oui / 0 = Non) : ");
-            pending_challenge = 1;
-            pthread_mutex_unlock(&lock);
-        }
-
-        else if (incoming == CHALLENGE_REQUEST_ANSWER) {
-            // response to a sent challenge
-            int challenged_user_id;
-            int answer = -1;
-            recv(client_fd, &challenged_user_id, sizeof(int), 0);
-            recv(client_fd, &answer, sizeof(int), 0);
-
-            if (answer == 0) {
-                printf("\n>>> Votre défi à l'utilisateur %d a été refusé.\n", challenged_user_id);
-            }
-            else {
-                printf("\n>>> Votre défi à l'utilisateur %d a été accepté !", challenged_user_id);
-            }
-            sent_challenges--;
-        }
-
-        else if (incoming == ERROR) {
-            // an error occurred in the previous call
-            char error_msg[256] = {0};
-            int previous_call;
-            recv(client_fd, &previous_call, sizeof(int), 0);
-            recv(client_fd, error_msg, sizeof(error_msg), 0);
-            printf(">>> Erreur : %s\n", error_msg);
-            pthread_mutex_lock(&lock);
-            switch (previous_call) {
-                case CHALLENGE:
-                    // this means our challenge was not sent correctly (maybe the user id does not exist)
-                    sent_challenges--;
-                    break;
-                case CONSULT_USER_PROFILE:
-                    // it means we could not get the user profile, so we unblock the waiting thread
-                    pthread_cond_signal(&cond_user_profile);
-                    break;
-                case CHALLENGE_REQUEST_ANSWER:
-                    // in case of error we consider the challenge was refused
-                    break;
-                case LIST_USERS:
-                    // it means we could not get the user list, so we unblock the waiting thread
-                    pthread_cond_signal(&cond_list_users);
-                    break;
-
-                default:
-                    break;
-            }
-            pthread_mutex_unlock(&lock);
-        }
-
-        else if (incoming == SUCCESS) {
-            // confirmation of a successful previous call (for now only used for challenge sent)
-            printf(">>> Votre demande a été envoyée avec succès.\n");
-            pthread_cond_signal(&cond_list_users);
-        }
-
-        else if (incoming == LIST_USERS) {
-            // receiving the list of online users
-            char user_list_buffer[1024] = {0};
-            recv(client_fd, user_list_buffer, sizeof(user_list_buffer), 0);
-            printf("Utilisateurs en ligne :\n%s\n", user_list_buffer);
-            pthread_cond_signal(&cond_list_users);
-        }
-
-        else if (incoming == LIST_ONGOING_GAMES) {
-            // receiving the list of ongoing games
-            char games_list_buffer[1024] = {0};
-            recv(client_fd, games_list_buffer, sizeof(games_list_buffer), 0);
-            printf("Parties en cours :\n%s\n", games_list_buffer);
-            pthread_cond_signal(&cond_list_games);
-        }
-
-        else if (incoming == CONSULT_USER_PROFILE) {
-            // we need to sent our user profile to the server because somebody requested it
-            CallType ct = SENT_USER_PROFILE;
-            // we need to know who asked for it (to send the correct profile)
-            int request_user_id;
-            recv(client_fd, &request_user_id, sizeof(int), 0);
-
-            if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send ct");
-            if (send(client_fd, &request_user_id, sizeof(int), 0) <= 0) perror("send id");
-
-            // user buffer to serialize our profile into
-            uint8_t user_buffer[1024] = {0};
-            serialize_User(&user, user_buffer);
-            if (send(client_fd, &user_buffer, sizeof(user_buffer), 0) <= 0)
-                perror("send user");
-        }
-
-        else if (incoming == RECEIVE_USER_PROFILE) {
-            // receiving a user profile we requested
-            uint8_t buffer[1024] = {0};
-            if (recv(client_fd, buffer, sizeof(buffer), 0) <= 0) {
-                perror("recv failed");
-                exit(EXIT_FAILURE);
-            }
-            User user_received;
-            deserialize_User(buffer, &user_received);
-            printf("Profil de l'utilisateur demandé :\n");
-            printUser(&user_received);
-            pthread_cond_signal(&cond_user_profile);
-        }
-        else if (incoming == CHALLENGE_START) {
-            // the challenge has started, we can start the game thread with a lock to ensure the creation this code is fully executed before any game messages arrive
-            pthread_mutex_lock(&lock_turn);
-            char opponent_username[USERNAME_SIZE + 1] = {0};
-            recv(client_fd, opponent_username, USERNAME_SIZE + 1, 0);
-            clear_terminal();
-            printf("\n>>> Le défi avec %s commence maintenant !\n", opponent_username);
-
-            in_game = 1;
-
-            int *fd_arg = malloc(sizeof(int));
-            *fd_arg = client_fd;
-            pthread_t game_thread;
-            // create the game thread
-            if (pthread_create(&game_thread, NULL, play_game, fd_arg) != 0) {
-                perror("pthread_create");
-                free(fd_arg);
-            } else {
-            }
-            printf(">>> Thread de jeu démarré.\n");
-            pthread_mutex_unlock(&lock_turn);
-        }
-
-        else if (incoming == YOUR_TURN) {
-            // it's our turn to play
-            int move_played;
-            recv(client_fd, &move_played, sizeof(move_played), 0);
-            printf("\n>>> Le serveur a notifié que c'est votre tour de jouer.\n");
-            pthread_mutex_lock(&lock_turn);
-            your_turn = 1;
-            last_move = move_played;
-            pthread_cond_signal(&cond_game_turn);
-            pthread_mutex_unlock(&lock_turn);
-        }
-
-        else if (incoming == GAME_OVER) {
-            // the server notifies that the game is over
-            GAME_OVER_REASON reason;
-            recv(client_fd, &reason, sizeof(reason), 0);
-            printf("\n>>> Le serveur a notifié que la partie est terminée.\n");
-            pthread_mutex_lock(&lock_turn);
-            game_over = reason;
-            your_turn = 1;
-            // wake up the game thread to handle the end of the game
-            pthread_cond_signal(&cond_game_turn);
-            pthread_mutex_unlock(&lock_turn);
-        }
-
-
-        else {
-            printf("\n>>> Message inconnu reçu du serveur.\n");
-        }
-
-        fflush(stdout);
-    }
-
-    return NULL;
-}
-
-void handle_incoming_challenge() {
-    // thread that handles incoming challenges
-    pthread_mutex_lock(&lock);
-    if (!pending_challenge) {
-        pthread_mutex_unlock(&lock);
-        return;
-    }
-
-    int challenger_id = challenger_id_global;
-    char challenger_name[USERNAME_SIZE + 1];
-    strcpy(challenger_name, challenger_username_global);
-    pending_challenge = 0;
-    pthread_mutex_unlock(&lock);
-
-    while (choice_input != 0 && choice_input != 1) {
-        printf("1 pour accepter, 0 pour refuser : ");
-        if (scanf("%d", &choice_input) != 1) {
-            while (getchar() != '\n');
-            continue;
-        }
-        while (getchar() != '\n');
-    }
-
-    CallType ct = CHALLENGE_REQUEST_ANSWER;
-    if (send(client_fd_global, &ct, sizeof(ct), 0) <= 0) perror("send ct");
-    if (send(client_fd_global, &challenger_id, sizeof(challenger_id), 0) <= 0) perror("send id");
-    if (send(client_fd_global, &choice_input, sizeof(choice_input), 0) <= 0) perror("send choix");
-
-    if (choice_input == 1) {
-        // if accepted, we wait for the server to start the game
-        printf(">>> Vous avez accepté le défi de %s !\n", challenger_name);
-        pthread_mutex_lock(&lock);
-        in_game = 1;
-        pthread_mutex_unlock(&lock);
-
-    }
-
-    else
-        printf(">>> Vous avez refusé le défi de %s.\n", challenger_name);
-}
-
-int start_client() {
-    // principle thread that runs the menu and send menu choices to the server
-    int client_fd;
+/*
+ * Initialize the connexion and start the network thread
+ */
+void client_init(const char *server_ip, int port) {
     struct sockaddr_in serv_addr;
 
     if ((client_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         perror("socket failed");
         exit(EXIT_FAILURE);
     }
-    client_fd_global = client_fd;
-
-    // get username
-    char username[USERNAME_SIZE + 1];
-    printf("Entrez votre nom d'utilisateur: ");
-    fgets(username, USERNAME_SIZE + 1, stdin);
-    username[strcspn(username, "\n")] = 0;
 
     serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(PORT);
-    if (inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr) <= 0) {
+    serv_addr.sin_port = htons(port);
+    if (inet_pton(AF_INET, server_ip, &serv_addr.sin_addr) <= 0) {
         perror("inet_pton failed");
         exit(EXIT_FAILURE);
     }
 
-    if (connect(client_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+    if (connect(client_fd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
         perror("connect failed");
         exit(EXIT_FAILURE);
     }
 
-    // Handshake CONNECT
+    // Start network listener thread
+    int *fd_arg = malloc(sizeof(int));
+    *fd_arg = client_fd;
+    if (pthread_create(&network_thread, NULL, listen_server, fd_arg) != 0) {
+        perror("pthread_create network thread");
+        free(fd_arg);
+        exit(EXIT_FAILURE);
+    }
+}
+
+/*
+ * This function listens to incoming server messages.
+ * It should be started from a separate thread, and will trigger cligui functions
+ */
+void *listen_server(void *arg) {
+    int fd = *(int *) arg;
+    free(arg);
+
+    CallType call_type;
+    while (1) {
+        // Read CallType
+        size_t n = recv(fd, &call_type, sizeof(call_type), 0);
+        if (n <= 0) network_error();
+
+        int is_sync = is_client_sync_CallType(call_type);
+        int is_async = is_client_async_CallType(call_type);
+        if (!is_sync && !is_async) {
+            printf("Avertissement: Réception d'un CallType invalide : %d\n", call_type);
+            continue;
+        }
+
+        // Read Payload size
+        int payload_size;
+        size_t n = recv(fd, &payload_size, sizeof(int), 0);
+        if (n <= 0) network_error();
+
+        // Read Payload
+        char *payload = malloc(sizeof(char) * payload_size);
+        n = recv(fd, payload, payload_size, 0);
+        if (n <= 0) network_error();
+
+        if (is_async) {
+            // Save data
+            pthread_mutex_lock(&incoming_lock);
+            // Wait until the last payload has been processed
+            while (incoming_available) {
+                pthread_mutex_unlock(&incoming_lock);
+                usleep(10000);
+                pthread_mutex_lock(&incoming_lock);
+            }
+            incoming_available = 1;
+            incoming_call_type = call_type;
+            incoming_payload = payload;
+            pthread_mutex_unlock(&incoming_lock);
+        } else {
+            process_sync_call(payload_size, payload);
+        }
+    }
+}
+
+/*
+ * This function calls gui functions from messages received asynchronously.
+ * It should be called regularly by the gui to process pending calls.
+ */
+void process_network_messages(void) {
+    pthread_mutex_lock(&incoming_lock);
+
+    if (!incoming_available) {
+        pthread_mutex_unlock(&incoming_lock);
+        return;
+    }
+
+    if (incoming_call_type == CONNECT_CONFIRM) {
+        User user;
+        deserialize_User(incoming_payload, &user);
+        on_connected(user);
+
+    }else if (incoming_call_type == CHALLENGE) {
+        // read values from the incoming_payload, taking the four first bytes and merging them
+        int challenger_id = incoming_payload[0] + (incoming_payload[1] << 8) + (incoming_payload[2] << 16) + (incoming_payload[3] << 24);
+
+        // Read username 32 bits
+        char challenger_username[USERNAME_SIZE + 1];
+        for (int index = 0; index <= USERNAME_SIZE; index++) {
+            challenger_username[index] = incoming_payload[4 + index];
+        }
+        on_challenge_received(challenger_id, challenger_username);
+
+    } else if (incoming_call_type == CHALLENGE_REQUEST_ANSWER) {
+        // response to a sent challenge
+        int challenged_user_id = read_int32_le(incoming_payload, 0);
+        int answer = read_int32_le(incoming_payload, 4);
+
+        on_challenge_request_answer(challenged_user_id, answer);
+
+    } else if (incoming_call_type == ERROR) {
+        // an error occurred in the previous call
+        int previous_call = read_int32_le(incoming_payload, 0);
+        char error_msg[256] = {0};
+        memcpy(error_msg, incoming_payload + 4, 128);
+
+        on_error(previous_call, error_msg);
+    } else if (incoming_call_type == SUCCESS) {
+        // confirmation of a successful previous call
+        on_success();
+
+    } else if (incoming_call_type == LIST_USERS) {
+        // receiving the list of online users
+        char user_list_buffer[1024] = {0};
+        memcpy(user_list_buffer, incoming_payload, 1024);
+        on_list_users(user_list_buffer);
+
+    } else if (incoming_call_type == LIST_ONGOING_GAMES) {
+        // receiving the list of ongoing games
+        char games_list_buffer[1024] = {0};
+        memcpy(games_list_buffer, incoming_payload, 1024);
+        on_list_ongoing_games(games_list_buffer);
+
+    } else if (incoming_call_type == RECEIVE_USER_PROFILE) {
+        // receiving a user profile we requested
+        uint8_t buffer[1024] = {0};
+        memcpy(buffer, incoming_payload, 1024);
+        on_receive_user_profile(buffer);
+
+    } else if (incoming_call_type == CHALLENGE_START) {
+        // the challenge has started
+        char opponent_username[USERNAME_SIZE + 1] = {0};
+        memcpy(opponent_username, incoming_payload, USERNAME_SIZE + 1);
+        on_challenge_start(opponent_username);
+
+    } else if (incoming_call_type == YOUR_TURN) {
+        // it's our turn to play
+        int move_played = incoming_payload[0] + (incoming_payload[1] << 8) + (incoming_payload[2] << 16) + (incoming_payload[3] << 24);
+        on_your_turn(move_played);
+
+    } else if (incoming_call_type == GAME_OVER) {
+        // the server notifies that the game is over
+        GAME_OVER_REASON reason = (GAME_OVER_REASON) (incoming_payload[0] + (incoming_payload[1] << 8) + (incoming_payload[2] << 16) + (
+                                                          incoming_payload[3] << 24));
+        on_game_over(reason);
+
+    } else {
+        printf("\n>>> Message inconnu reçu du serveur.\n");
+    }
+
+    incoming_available = 0;
+    free(incoming_payload);
+    pthread_mutex_unlock(&incoming_lock);
+}
+
+void process_sync_call(CallType type, int payload_size, char* payload) {
+    if (type == CONSULT_USER_PROFILE) {
+        if (payload_size != sizeof(int)) {
+            printf("Received invalid payload size %d for CallType %d", payload_size, type);
+            return;
+        }
+        // we need to sent our user profile to the server because somebody requested it
+        int request_user_id = payload[0] + (payload[1] << 8) + (payload[2] << 16) + (payload[3] << 24);
+        interrupt_consult_user_profile(request_user_id);
+    }
+}
+
+
+
+/*
+ * Send functions
+ */
+
+void send_connect(const char *username) {
     CallType call_type = CONNECT;
     if (send(client_fd, &call_type, sizeof(CallType), 0) <= 0) {
         perror("send failed");
@@ -434,144 +232,46 @@ int start_client() {
         perror("send failed");
         exit(EXIT_FAILURE);
     }
-
-    uint8_t buffer[1024] = {0};
-    if (recv(client_fd, buffer, sizeof(buffer), 0) <= 0) {
-        perror("recv failed");
-        exit(EXIT_FAILURE);
-    }
-    deserialize_User(buffer, &user);
-    printf("Connecté en tant que %s (id=%d)\n", user.username, user.id);
-
-    pthread_t listener_thread;
-    pthread_create(&listener_thread, NULL, listen_server, &client_fd);
-
-    while (1) {
-        // let the chance for incoming messages from the server to arrive and be displayed before showing the menu again
-        sleep(0.5);
-        pthread_mutex_lock(&lock);
-        while (in_game) {
-            pthread_cond_wait(&cond_game, &lock);
-        }
-        pthread_mutex_unlock(&lock);
-
-
-        // handle incoming changes will set pending_challenge to 1 if there is a challenge that has been accepted
-        handle_incoming_challenge();
-
-        // if we are in a game, we skip the menu and play the game
-        //play_game();
-
-        if (in_game){
-            // in this case, the input must be used for the game and not for the menu
-            continue;
-        }
-
-        printf("\n===== MENU =====\n");
-        printf(" 1 - Voir votre profil\n");
-        printf(" 2 - Afficher les utilisateurs en ligne\n");
-        printf(" 3 - Défier un utilisateur\n");
-        printf(" 4 - Consulter le profil d'un utilisateur\n");
-        printf(" 5 - Afficher les parties en cours\n");
-        printf(" 6 - Quitter\n");
-        printf("Votre choix: ");
-
-        if (scanf("%d", &choice_input) != 1) {
-            printf("Entrée invalide.\n");
-            while (getchar() != '\n');
-            continue;
-        }
-        while (getchar() != '\n');
-
-        if (pending_challenge){
-            // in this case, the input must be used to answer the challenge and not for the menu
-            continue;
-        }
-
-        if (in_game){
-            // when the challenger has his challenge accepted, we enter the game directly
-            continue;
-        }
-        if (choice_input == 1) {
-            printUser(&user);
-        }
-
-        else if (choice_input == 2) {
-            CallType ct = LIST_USERS;
-            if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send failed");
-            pthread_mutex_lock(&lock);
-            pthread_cond_wait(&cond_list_users, &lock);
-            pthread_mutex_unlock(&lock);
-        }
-
-        else if (choice_input == 3) {
-            if (sent_challenges){
-                printf("Vous avez déjà envoyé une demande, veuillez attendre la réponse avant d'en faire de nouvelles\n");
-                continue;
-            }
-            int opponent_id;
-            printf("Entrer l'id de l'adversaire: ");
-            if (scanf("%d", &opponent_id) != 1) {
-                printf("Entrée invalide.\n");
-                while (getchar() != '\n');
-                continue;
-            }
-            while (getchar() != '\n');
-
-            CallType ct = CHALLENGE;
-            if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send failed");
-            if (send(client_fd, &opponent_id, sizeof(int), 0) <= 0) perror("send failed");
-            sent_challenges++;
-            printf(">>> En attente de la réponse de l'adversaire...\n");
-        }
-
-        else if (choice_input == 4) {
-            int user_profile_id;
-            printf("Entrer l'id du joueur: ");
-            if (scanf("%d", &user_profile_id) != 1) {
-                printf("Entrée invalide.\n");
-                while (getchar() != '\n');
-                continue;
-            }
-            while (getchar() != '\n');
-
-            CallType ct = CONSULT_USER_PROFILE;
-            if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send failed");
-            if (send(client_fd, &user_profile_id, sizeof(int), 0) <= 0) perror("send failed");
-
-            pthread_mutex_lock(&lock);
-            pthread_cond_wait(&cond_user_profile, &lock);
-            pthread_mutex_unlock(&lock);
-        }
-        else if (choice_input == 2) {
-            CallType ct = LIST_USERS;
-            if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send failed");
-            pthread_mutex_lock(&lock);
-            pthread_cond_wait(&cond_list_users, &lock);
-            pthread_mutex_unlock(&lock);
-        }
-
-        else if (choice_input == 6) {
-            close(client_fd);
-            printf("Déconnecté.\n");
-            exit(EXIT_SUCCESS);
-        }
-
-        else if (choice_input == 5) {
-            CallType ct = LIST_ONGOING_GAMES;
-            if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send failed");
-            pthread_mutex_lock(&lock);
-            pthread_cond_wait(&cond_list_games, &lock);
-            pthread_mutex_unlock(&lock);
-        }
-
-        else {
-            printf("Choix invalide.\n");
-        }
-    }
-
-    return 0;
 }
 
+void send_list_users(void) {
+    CallType ct = LIST_USERS;
+    if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send failed");
+}
 
+void send_challenge(int opponent_id) {
+    CallType ct = CHALLENGE;
+    if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send failed");
+    if (send(client_fd, &opponent_id, sizeof(int), 0) <= 0) perror("send failed");
+}
 
+void send_consult_user_profile(int user_id) {
+    CallType ct = CONSULT_USER_PROFILE;
+    if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send failed");
+    if (send(client_fd, &user_id, sizeof(int), 0) <= 0) perror("send failed");
+}
+
+void send_list_ongoing_games(void) {
+    CallType ct = LIST_ONGOING_GAMES;
+    if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send failed");
+}
+
+void send_challenge_answer(int challenger_id, int answer) {
+    CallType ct = CHALLENGE_REQUEST_ANSWER;
+    if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send ct");
+    if (send(client_fd, &challenger_id, sizeof(challenger_id), 0) <= 0) perror("send id");
+    if (send(client_fd, &answer, sizeof(answer), 0) <= 0) perror("send answer");
+}
+
+void send_user_profile(int request_user_id, uint8_t user_buffer[1024]) {
+    CallType ct = SENT_USER_PROFILE;
+    if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send ct");
+    if (send(client_fd, &request_user_id, sizeof(int), 0) <= 0) perror("send id");
+    if (send(client_fd, user_buffer, sizeof(uint8_t) * 1024, 0) <= 0) perror("send user");
+}
+
+void send_play_made(int move) {
+    CallType ct = PLAY_MADE;
+    if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send ct");
+    if (send(client_fd, &move, sizeof(move), 0) <= 0) perror("send move");
+}

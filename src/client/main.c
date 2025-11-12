@@ -1,6 +1,13 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "cligui.h"
 #include "client.h"
+#include "../common/model.h"
 
-int main() {
+#define PORT 8080
+
+int main(void) {
     /* Sequential actions:
      * - Request connection (providing username). Connection refused if someone is already connected with this username.
      * - Possible actions:
@@ -15,5 +22,12 @@ int main() {
      */
 
 
-    return start_client();
+
+    // Initialize client connection
+    client_init("127.0.0.1", PORT);
+
+    // Run the main UI loop (blocks until exit)
+    run_client_ui();
+
+    return 0;
 }

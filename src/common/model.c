@@ -149,6 +149,7 @@ int collectSeedsAndCountPoints(Game *game, int position, int player) {
         }
         return score;
     }
+    return score;
 }
 
 

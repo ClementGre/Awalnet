@@ -73,7 +73,7 @@ typedef struct {
 static GameInstance *games[MAX_GAMES] = {0};
 static int next_game_id = 1;
 
-GameInstance *alloc_game() {
+GameInstance *alloc_game(void) {
     for (int i = 0; i < MAX_GAMES; ++i) {
         if (games[i] == NULL) {
             GameInstance *g = calloc(1, sizeof(GameInstance));
@@ -225,19 +225,6 @@ void *game_thread(void *arg) {
             send(g->game->player2.fd, &go, sizeof(go), 0);
             send(g->game->player2.fd, &win, sizeof(win), 0);
 
-            int idx1 = find_client_index_by_fd(g->game->player1.fd);
-            int idx2 = find_client_index_by_fd(g->game->player2.fd);
-            if (idx1 != -1) {
-                pthread_mutex_lock(&clients_mutex);
-                clients[idx1].in_game = 0;
-                pthread_mutex_unlock(&clients_mutex);
-            }
-            if (idx2 != -1) {
-                pthread_mutex_lock(&clients_mutex);
-                clients[idx2].in_game = 0;
-                pthread_mutex_unlock(&clients_mutex);
-            }
-
             break;
         }
 
@@ -280,7 +267,7 @@ void *game_thread(void *arg) {
 // ---------------------- GAME LOGIC ---------------------- //
 
 
-int start_server() {
+int start_server(void) {
     printf("🚀 Starting Awalnet server...\n");
     int server_fd;
     struct sockaddr_in address;

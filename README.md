@@ -111,7 +111,7 @@ When a player challenges another player, if he receives a challenge and has not 
 
 ✅ When a match is created between A and B, the server randomly decides who starts. 
 
-❌ The server verifies the legality of moves (using the code created in step 0).
+✅ The server verifies the legality of moves (using the code created in step 0) --> it is the client that verifies the legality of moves in our code.
 
 ✅ If you have a working version for one game, ensure it also works for multiple simultaneous games. 
 
