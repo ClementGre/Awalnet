@@ -266,6 +266,29 @@ void *game_thread(void *arg) {
 
 // ---------------------- GAME LOGIC ---------------------- //
 
+void send_payload(CallType calltype, u_int8_t *payload, size_t payload_size, int fd) {
+    send(fd, &calltype, sizeof(calltype), 0);
+    send(fd, &payload_size, sizeof(int), 0);
+    send(fd, payload, payload_size, 0);
+
+}
+
+void send_error(CallType calltype, const char *error_msg, int fd) {
+
+    size_t msg_len = strlen(error_msg) + 1; // +1 pour le '\0'
+    size_t total_size = sizeof(CallType) + msg_len;
+
+    uint8_t buffer[total_size];
+
+    // Copie du calltype d’origine (par ex. LOGIN, PING, etc.)
+    memcpy(buffer, &calltype, sizeof(CallType));
+
+    // Copie du message d’erreur juste après
+    memcpy(buffer + sizeof(CallType), error_msg, msg_len);
+
+    send_payload(ERROR, buffer, total_size, fd);
+
+}
 
 int start_server(void) {
     printf("🚀 Starting Awalnet server...\n");
@@ -376,7 +399,10 @@ int start_server(void) {
 
                     uint8_t user_buffer[1024] = {0};
                     serialize_User(&user, user_buffer);
-                    send(clients[i].fd, user_buffer, sizeof(user_buffer), 0);
+                    CallType out = CONNECT_CONFIRM;
+                    //send(clients[i].fd, &out, sizeof(out), 0);
+                    //send(clients[i].fd, user_buffer, sizeof(user_buffer), 0);
+                    send_payload(out, user_buffer, sizeof(user_buffer), clients[i].fd);
                     break;
                 }
                 case CHALLENGE: {
@@ -668,6 +694,18 @@ int start_server(void) {
                     printf("Sending %s's profile to %s\n", clients[i].username, clients[target].username);
                     send(clients[target].fd, &out, sizeof(out), 0);
                     send(clients[target].fd, buffer, sizeof(buffer), 0);
+                    break;
+                }
+                case WATCH_GAME: {
+                    CallType out = WATCH_GAME;
+                    int game_id;
+                    if (recv(clients[i].fd, &game_id, sizeof (int), 0) <= 0) {
+                        close(clients[i].fd);
+                        clients[i].active = 0;
+                    }
+                    printf("Client %d wants to watch game %d\n", clients[i].user_id, game_id);
+                    // then fetch players in the game and asks them to allow or not
+                    send(clients[i].fd, &out, sizeof(out), 0);
                     break;
                 }
                 default: break;

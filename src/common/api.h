@@ -14,7 +14,7 @@ typedef enum CallType {
     CONNECT = 0, // Request Username
     LIST_USERS = 1,
     LIST_GAMES = 2,
-    LIST_CHALLENGES = 3,
+    CONNECT_CONFIRM = 3,
     CHALLENGE = 4, // Request opponent_user_id
     CONSULT_USER_PROFILE = 5, // Request user_id
     ERROR = 6, // Notify client that an error occurred (for now message to explain why a challenge failed)

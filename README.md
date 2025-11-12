@@ -35,7 +35,7 @@ sequenceDiagram
     participant Client
     participant Server
     Client->>Server: CONNECT (username)
-    Server->>Client: Serialized User (User struct)
+    Server->>Client: CONNECT_CONFIRM and Serialized User (User struct)
     
  ``` 
 
@@ -121,10 +121,10 @@ When a player challenges another player, if he receives a challenge and has not 
 
 ❌ Implement a chat option, in addition to sending moves, players can exchange messages to chat (both inside and outside a game).
 
-❌ Allow a player to write a bio, say 10 ASCII lines to introduce themselves. The server should be able to display the bio of a given username.
+✅ Allow a player to write a bio, say 10 ASCII lines to introduce themselves. The server should be able to display the bio of a given username.
 
 ❌ Add a private mode, a player can limit the list of spectators to a list of friends. Implement this feature.
 
-❌ dd the ability to save played games so they can be reviewed later.
+❌ Add the ability to save played games so they can be reviewed later.
 
 ❌ Free to your imagination, player rankings (Wikipedia article on Elo rating), tournament organization, adapting it to another game, etc.

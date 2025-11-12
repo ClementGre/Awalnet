@@ -14,7 +14,9 @@
 
 enum {
     USERNAME_SIZE = 32,
-    BIO_SIZE = 10 * 128
+    BIO_SIZE = 10 * 128,
+    ERROR_MESSAGE_SIZE = 128,
+    MAX_FRIEND = 10
 };
 
 typedef struct User {
