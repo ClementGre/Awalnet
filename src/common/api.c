@@ -20,7 +20,10 @@ uint8_t is_server_CallType(CallType type) {
         case GAME_OVER: return 0;
         case LIST_ONGOING_GAMES: return 1;
         case WATCH_GAME: return 1;
-
+        case SEND_LOBBY_CHAT: return 1;
+        case SEND_GAME_CHAT: return 1;
+        case RECEIVE_LOBBY_CHAT: return 0;
+        case RECEIVE_GAME_CHAT: return 0;
     }
     return 0;
 }
@@ -46,7 +49,10 @@ uint8_t is_client_async_CallType(CallType type) {
         case GAME_OVER: return 1;
         case LIST_ONGOING_GAMES: return 1;
         case WATCH_GAME: return 1;
-
+        case SEND_LOBBY_CHAT: return 0;
+        case SEND_GAME_CHAT: return 0;
+        case RECEIVE_LOBBY_CHAT: return 1;
+        case RECEIVE_GAME_CHAT: return 1;
     }
     return 0;
 }
@@ -71,6 +77,10 @@ uint8_t is_client_sync_CallType(CallType type) {
         case GAME_OVER: return 0;
         case LIST_ONGOING_GAMES: return 0;
         case WATCH_GAME: return 0;
+        case SEND_LOBBY_CHAT: return 0;
+        case SEND_GAME_CHAT: return 0;
+        case RECEIVE_LOBBY_CHAT: return 0;
+        case RECEIVE_GAME_CHAT: return 0;
     }
     return 0;
 }

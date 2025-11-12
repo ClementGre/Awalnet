@@ -17,6 +17,9 @@
 static int client_fd = -1;
 static pthread_t network_thread;
 
+// Notification pipe: [0] = read, [1] = write
+static int notification_pipe[2] = {-1, -1};
+
 // Network message handling
 static int incoming_available = 0;
 static CallType incoming_call_type;
@@ -36,6 +39,12 @@ void process_sync_call(CallType type, int payload_size, uint8_t* payload);
  */
 void client_init(const char *server_ip, int port) {
     struct sockaddr_in serv_addr;
+
+    // Create notification pipe
+    if (pipe(notification_pipe) < 0) {
+        perror("pipe failed");
+        exit(EXIT_FAILURE);
+    }
 
     if ((client_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         perror("socket failed");
@@ -62,6 +71,10 @@ void client_init(const char *server_ip, int port) {
         free(fd_arg);
         exit(EXIT_FAILURE);
     }
+}
+
+int client_get_notification_fd(void) {
+    return notification_pipe[0];
 }
 
 /*
@@ -113,6 +126,10 @@ void *listen_server(void *arg) {
             incoming_call_type = call_type;
             incoming_payload = payload;
             pthread_mutex_unlock(&incoming_lock);
+
+            // Notify UI thread via pipe
+            char notify = 1;
+            write(notification_pipe[1], &notify, 1);
         } else {
             process_sync_call(call_type, payload_size, payload);
         }
@@ -123,13 +140,17 @@ void *listen_server(void *arg) {
  * This function calls gui functions from messages received asynchronously.
  * It should be called regularly by the gui to process pending calls.
  */
-void process_network_messages(void) {
+int process_network_messages(void) {
     pthread_mutex_lock(&incoming_lock);
 
     if (!incoming_available) {
         pthread_mutex_unlock(&incoming_lock);
-        return;
+        return 0;
     }
+
+    // Clear notification pipe
+    char dummy;
+    read(notification_pipe[0], &dummy, 1);
 
     if (incoming_call_type == CONNECT_CONFIRM) {
         User user;
@@ -200,6 +221,26 @@ void process_network_messages(void) {
                                                           incoming_payload[3] << 24));
         on_game_over(reason);
 
+    } else if (incoming_call_type == RECEIVE_LOBBY_CHAT) {
+        // receiving a lobby chat message
+        int sender_id = incoming_payload[0] + (incoming_payload[1] << 8) + (incoming_payload[2] << 16) + (incoming_payload[3] << 24);
+        char sender_username[USERNAME_SIZE + 1] = {0};
+        memcpy(sender_username, incoming_payload + 4, USERNAME_SIZE + 1);
+        char message[MAX_CHAT_MESSAGE_SIZE] = {0};
+        memcpy(message, incoming_payload + 4 + USERNAME_SIZE + 1, MAX_CHAT_MESSAGE_SIZE);
+
+        on_receive_lobby_chat(sender_id, sender_username, message);
+
+    } else if (incoming_call_type == RECEIVE_GAME_CHAT) {
+        // receiving a game chat message
+        int sender_id = incoming_payload[0] + (incoming_payload[1] << 8) + (incoming_payload[2] << 16) + (incoming_payload[3] << 24);
+        char sender_username[USERNAME_SIZE + 1] = {0};
+        memcpy(sender_username, incoming_payload + 4, USERNAME_SIZE + 1);
+        char message[MAX_CHAT_MESSAGE_SIZE] = {0};
+        memcpy(message, incoming_payload + 4 + USERNAME_SIZE + 1, MAX_CHAT_MESSAGE_SIZE);
+
+        on_receive_game_chat(sender_id, sender_username, message);
+
     } else {
         printf("\n>>> Message inconnu reçu du serveur.\n");
     }
@@ -207,6 +248,8 @@ void process_network_messages(void) {
     incoming_available = 0;
     free(incoming_payload);
     pthread_mutex_unlock(&incoming_lock);
+
+    return 1;
 }
 
 void process_sync_call(CallType type, int payload_size, uint8_t* payload) {
@@ -279,4 +322,22 @@ void send_play_made(int move) {
     CallType ct = PLAY_MADE;
     if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send ct");
     if (send(client_fd, &move, sizeof(move), 0) <= 0) perror("send move");
+}
+
+void send_lobby_chat(const char* message) {
+    CallType ct = SEND_LOBBY_CHAT;
+    char msg_buffer[MAX_CHAT_MESSAGE_SIZE] = {0};
+    strncpy(msg_buffer, message, MAX_CHAT_MESSAGE_SIZE - 1);
+
+    if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send ct");
+    if (send(client_fd, msg_buffer, MAX_CHAT_MESSAGE_SIZE, 0) <= 0) perror("send message");
+}
+
+void send_game_chat(const char* message) {
+    CallType ct = SEND_GAME_CHAT;
+    char msg_buffer[MAX_CHAT_MESSAGE_SIZE] = {0};
+    strncpy(msg_buffer, message, MAX_CHAT_MESSAGE_SIZE - 1);
+
+    if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send ct");
+    if (send(client_fd, msg_buffer, MAX_CHAT_MESSAGE_SIZE, 0) <= 0) perror("send message");
 }

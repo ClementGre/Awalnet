@@ -11,6 +11,8 @@ typedef enum GAME_OVER_REASON {
     OPPONENT_DISCONNECTED = 4
 } GAME_OVER_REASON;
 
+#define MAX_CHAT_MESSAGE_SIZE 256
+
 typedef enum CallType {
     CONNECT = 0, // Request Username
     LIST_USERS = 1,
@@ -29,7 +31,11 @@ typedef enum CallType {
     GAME_OVER = 14, // Notify the client that the game is over (followed by GAME_OVER_REASON)
     LIST_ONGOING_GAMES = 15, // Notify the client with the list of ongoing games
     WATCH_GAME = 16, // Request ongoing game to watch
-    ALLOW_CLIENT_TO_WATCH = 17 // Both players in a game have to answer that call when somebody wants to watch their game
+    ALLOW_CLIENT_TO_WATCH = 17, // Both players in a game have to answer that call when somebody wants to watch their game
+    SEND_LOBBY_CHAT = 18, // Send chat message to all users in lobby (not in game)
+    SEND_GAME_CHAT = 19, // Send chat message to opponent in game
+    RECEIVE_LOBBY_CHAT = 20, // Receive lobby chat message (sender_id + username + message)
+    RECEIVE_GAME_CHAT = 21 // Receive game chat message (sender_id + username + message)
 } CallType;
 
 // Returns the size of a CallType payload, excluding the CallType itself.

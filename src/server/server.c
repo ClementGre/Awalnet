@@ -185,6 +185,59 @@ void *game_thread(void *arg) {
             break;
         }
 
+        if (incoming == SEND_GAME_CHAT) {
+            // Handle chat message
+            char message[MAX_CHAT_MESSAGE_SIZE] = {0};
+            n = recv(current_player.fd, message, MAX_CHAT_MESSAGE_SIZE, 0);
+            if (n <= 0) {
+                perror("recv chat message");
+                break;
+            }
+
+            printf("Game %d chat from player fd %d: %s\n", g->game_id, current_player.fd, message);
+
+            // Forward to opponent
+            Player opponent = (tours % 2 == 0) ? g->game->player2 : g->game->player1;
+            int sender_id = current_player.user_id;
+
+            // Find sender username
+            char sender_username[USERNAME_SIZE + 1] = {0};
+            int sender_idx = find_client_index_by_fd(current_player.fd);
+            if (sender_idx != -1) {
+                pthread_mutex_lock(&clients_mutex);
+                strncpy(sender_username, clients[sender_idx].username, USERNAME_SIZE);
+                pthread_mutex_unlock(&clients_mutex);
+            }
+
+            CallType out = RECEIVE_GAME_CHAT;
+            uint8_t buffer[sizeof(int) + USERNAME_SIZE + 1 + MAX_CHAT_MESSAGE_SIZE];
+            memcpy(buffer, &sender_id, sizeof(int));
+            memcpy(buffer + sizeof(int), sender_username, USERNAME_SIZE + 1);
+            memcpy(buffer + sizeof(int) + USERNAME_SIZE + 1, message, MAX_CHAT_MESSAGE_SIZE);
+
+            send_payload(out, buffer, sizeof(buffer), opponent.fd);
+
+            // Wait for PLAY_MADE again (chat doesn't count as a turn)
+            n = recv(current_player.fd, &incoming, sizeof(incoming), 0);
+            if (n <= 0) {
+                printf("Player fd %d disconnected after chat, ending game %d\n", current_player.fd, g->game_id);
+                int idx = find_client_index_by_fd(current_player.fd);
+                if (idx != -1) remove_client_by_index(idx);
+                int opponent_fd = (tours % 2 == 0) ? g->game->player2.fd : g->game->player1.fd;
+                int opp_idx = find_client_index_by_fd(opponent_fd);
+                if (opp_idx != -1) {
+                    pthread_mutex_lock(&clients_mutex);
+                    clients[opp_idx].in_game = 0;
+                    pthread_mutex_unlock(&clients_mutex);
+
+                    CallType go = GAME_OVER;
+                    GAME_OVER_REASON gameOverReason = OPPONENT_DISCONNECTED;
+                    send_payload(go, &gameOverReason, sizeof(gameOverReason), opponent_fd);
+                }
+                break;
+            }
+        }
+
         if (incoming == PLAY_MADE) {
             // recv the move
             n = recv(current_player.fd, &move_made, sizeof(move_made), 0);
@@ -766,6 +819,30 @@ int start_server(void) {
                     printf("Client %d wants to watch game %d\n", clients[i].user_id, game_id);
                     // then fetch players in the game and asks them to allow or not
                     //send(clients[i].fd, &out, sizeof(out), 0);
+                    break;
+                }
+                case SEND_LOBBY_CHAT: {
+                    char message[MAX_CHAT_MESSAGE_SIZE] = {0};
+                    if (recv(clients[i].fd, message, MAX_CHAT_MESSAGE_SIZE, 0) <= 0) {
+                        close(clients[i].fd);
+                        clients[i].active = 0;
+                        break;
+                    }
+
+                    printf("Lobby chat from %s (id=%d): %s\n", clients[i].username, clients[i].user_id, message);
+
+                    // Broadcast to all clients not in game (except sender)
+                    CallType out = RECEIVE_LOBBY_CHAT;
+                    uint8_t buffer[sizeof(int) + USERNAME_SIZE + 1 + MAX_CHAT_MESSAGE_SIZE];
+                    memcpy(buffer, &clients[i].user_id, sizeof(int));
+                    memcpy(buffer + sizeof(int), clients[i].username, USERNAME_SIZE + 1);
+                    memcpy(buffer + sizeof(int) + USERNAME_SIZE + 1, message, MAX_CHAT_MESSAGE_SIZE);
+
+                    for (int j = 0; j < MAX_CLIENTS; j++) {
+                        if (clients[j].active && clients[j].fd != clients[i].fd && !clients[j].in_game) {
+                            send_payload(out, buffer, sizeof(buffer), clients[j].fd);
+                        }
+                    }
                     break;
                 }
                 default: break;

@@ -3,10 +3,10 @@
 #include <string.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <sys/select.h>
+#include <errno.h>
 #include "cligui.h"
-
 #include <pthread.h>
-
 #include "client.h"
 #include "../common/api.h"
 #include "../common/model.h"
@@ -14,6 +14,15 @@
 
 static pthread_mutex_t user_lock = PTHREAD_MUTEX_INITIALIZER;
 static User user;
+
+// Input buffer state for preserving context across interruptions
+typedef struct InputContext {
+    char buffer[MAX_CHAT_MESSAGE_SIZE];
+    char prompt[128];
+    int active;
+} InputContext;
+
+static InputContext input_context = {0};
 
 // Friend list management
 typedef struct Friend {
@@ -58,6 +67,106 @@ void clear_terminal(void) {
     fflush(stdout);
 }
 
+/*
+ * Save current input context before interruption
+ */
+static void save_input_context(const char* prompt) {
+    strncpy(input_context.prompt, prompt, sizeof(input_context.prompt) - 1);
+    input_context.active = 1;
+}
+
+/*
+ * Restore input context after handling interruption
+ */
+static void restore_input_context(void) {
+    if (input_context.active) {
+        printf("%s", input_context.prompt);
+        fflush(stdout);
+    }
+}
+
+/*
+ * Read a line from stdin with interruption support via select()
+ * Returns: 1 if line read successfully, 0 if interrupted by network event, -1 on error
+ * The prompt parameter is saved to allow re-display after interruptions
+ */
+static int read_line_interruptible_with_prompt(char *buffer, size_t size, const char* prompt) {
+    int notification_fd = client_get_notification_fd();
+    fd_set readfds;
+
+    // Save context in case of interruption
+    save_input_context(prompt);
+
+    while (1) {
+        FD_ZERO(&readfds);
+        FD_SET(STDIN_FILENO, &readfds);
+        FD_SET(notification_fd, &readfds);
+
+        int max_fd = (STDIN_FILENO > notification_fd) ? STDIN_FILENO : notification_fd;
+
+        int ret = select(max_fd + 1, &readfds, NULL, NULL, NULL);
+
+        if (ret < 0) {
+            if (errno == EINTR) continue;
+            perror("select");
+            return -1;
+        }
+
+        // Check if network event occurred
+        if (FD_ISSET(notification_fd, &readfds)) {
+            // Process all pending messages
+            while (process_network_messages()) {}
+
+            // Re-display prompt after interruption
+            printf("\n");
+            restore_input_context();
+            continue; // Go back to select, don't return
+        }
+
+        // Check if stdin is ready
+        if (FD_ISSET(STDIN_FILENO, &readfds)) {
+            if (fgets(buffer, size, stdin) == NULL) {
+                clearerr(stdin);
+                continue;
+            }
+            input_context.active = 0;
+            return 1; // Successfully read line
+        }
+    }
+}
+
+/*
+ * Compatibility wrapper for read_line_interruptible
+ */
+static int read_line_interruptible(char *buffer, size_t size) {
+    return read_line_interruptible_with_prompt(buffer, size, "");
+}
+
+/*
+ * Wait for network events or timeout
+ * Returns: 1 if network event, 0 if timeout
+ */
+static int wait_for_network_event(int timeout_ms) {
+    int notification_fd = client_get_notification_fd();
+    fd_set readfds;
+    struct timeval tv;
+
+    FD_ZERO(&readfds);
+    FD_SET(notification_fd, &readfds);
+
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+    int ret = select(notification_fd + 1, &readfds, NULL, NULL, &tv);
+
+    if (ret < 0) {
+        if (errno != EINTR) perror("select");
+        return 0;
+    }
+
+    return ret > 0;
+}
+
 static void init_game_state(void) {
     pthread_mutex_lock(&user_lock);
     ui_state.me = newPlayer(user.id, -1);
@@ -80,6 +189,33 @@ static void cleanup_game_state(void) {
     ui_state.last_move = -1;
     ui_state.game_is_over = 0;
     ui_state.order = 0;
+}
+
+static void handle_waiting_for_opponent(void) {
+    if (ui_state.your_turn || !ui_state.in_game) {
+        return;
+    }
+
+    // While waiting, allow chat
+    printf("En attente de l'adversaire... (Tapez un message pour chatter ou appuyez sur Entrée pour attendre)\n> ");
+    fflush(stdout);
+
+    char input_buf[MAX_CHAT_MESSAGE_SIZE];
+    int ret = read_line_interruptible(input_buf, sizeof(input_buf));
+
+    if (ret == 0) {
+        // Interrupted by network event (probably opponent played)
+        process_network_messages();
+        return;
+    }
+
+    if (ret > 0) {
+        input_buf[strcspn(input_buf, "\n")] = 0;
+        if (strlen(input_buf) > 0) {
+            send_game_chat(input_buf);
+            printf(">>> Message envoyé.\n");
+        }
+    }
 }
 
 static void handle_game_turn(void) {
@@ -146,22 +282,48 @@ static void handle_game_turn(void) {
     int local_choice = -1;
 
     while (1) {
-        printf("ENTREZ UNE POSITION DE CASE POUR DÉPLACER LES GRAINES (1-6) : ");
-        if (fgets(input_buf, sizeof(input_buf), stdin) == NULL) {
-            clearerr(stdin);
-            continue;
+        const char* prompt = "ENTREZ UNE POSITION DE CASE POUR DÉPLACER LES GRAINES (1-6) ou un message pour chatter : ";
+        printf("%s", prompt);
+        fflush(stdout);
+
+        int ret = read_line_interruptible_with_prompt(input_buf, sizeof(input_buf), prompt);
+        if (ret < 0) continue;
+
+        // Try to parse as number
+        if (sscanf(input_buf, "%d", &local_choice) == 1) {
+            if (local_choice >= 1 && local_choice <= 6) break;
+            printf("Position invalide. Choisissez entre 1 et 6.\n");
+        } else {
+            // Not a number - treat as chat message
+            input_buf[strcspn(input_buf, "\n")] = 0;
+            if (strlen(input_buf) > 0) {
+                send_game_chat(input_buf);
+                printf(">>> Message envoyé.\n");
+            }
         }
-        if (sscanf(input_buf, "%d", &local_choice) != 1) continue;
-        if (local_choice >= 1 && local_choice <= 6) break;
     }
 
     // Validate the choice has seeds
     int adjusted_position = (ui_state.order == 1) ? local_choice - 1 : local_choice + 5;
     while (ui_state.game->board[adjusted_position] == 0) {
-        printf("Pas de graines dans cette case. Choisissez une autre case.\n");
-        if (fgets(input_buf, sizeof(input_buf), stdin) == NULL) { clearerr(stdin); continue; }
-        if (sscanf(input_buf, "%d", &local_choice) != 1) continue;
-        adjusted_position = (ui_state.order == 1) ? local_choice - 1 : local_choice + 5;
+        const char* prompt = "Pas de graines dans cette case. Choisissez une autre case (ou un message pour chatter) : ";
+        printf("%s", prompt);
+        fflush(stdout);
+
+        int ret = read_line_interruptible_with_prompt(input_buf, sizeof(input_buf), prompt);
+        if (ret < 0) continue;
+
+        // Try to parse as number
+        if (sscanf(input_buf, "%d", &local_choice) == 1) {
+            adjusted_position = (ui_state.order == 1) ? local_choice - 1 : local_choice + 5;
+        } else {
+            // Not a number - treat as chat message
+            input_buf[strcspn(input_buf, "\n")] = 0;
+            if (strlen(input_buf) > 0) {
+                send_game_chat(input_buf);
+                printf(">>> Message envoyé.\n");
+            }
+        }
     }
 
     // Make the move
@@ -178,8 +340,6 @@ static void handle_game_turn(void) {
     printf("Nouveau board : \n");
     printGame(ui_state.game, ui_state.order);
     printf("    SCORE : p1 : %d | p2 : %d\n", ui_state.me.score, ui_state.opponent.score);
-
-    printf("en attente de l'adversaire ...\n");
 }
 
 static void handle_pending_challenge(void) {
@@ -190,11 +350,17 @@ static void handle_pending_challenge(void) {
     int answer = -1;
     while (answer != 0 && answer != 1) {
         printf("1 pour accepter, 0 pour refuser : ");
+        fflush(stdout);
+
         char input_buf[32];
-        if (fgets(input_buf, sizeof(input_buf), stdin) == NULL) {
-            clearerr(stdin);
+        int ret = read_line_interruptible(input_buf, sizeof(input_buf));
+        if (ret == 0) {
+            // Interrupted by network event - process it and continue asking
+            process_network_messages();
             continue;
         }
+        if (ret < 0) continue;
+
         if (sscanf(input_buf, "%d", &answer) != 1) continue;
     }
 
@@ -317,28 +483,52 @@ void on_game_over(GAME_OVER_REASON reason) {
     ui_state.game_is_over = 1;
 }
 
-void run_client_ui(void) {
+void on_receive_lobby_chat(int sender_id, char sender_username[USERNAME_SIZE + 1], char message[MAX_CHAT_MESSAGE_SIZE]) {
+    printf("\n[LOBBY] %s: %s\n", sender_username, message);
+    fflush(stdout);
+}
 
-    // get username
+void on_receive_game_chat(int sender_id, char sender_username[USERNAME_SIZE + 1], char message[MAX_CHAT_MESSAGE_SIZE]) {
+    printf("\n[GAME] %s: %s\n", sender_username, message);
+    fflush(stdout);
+}
+
+void run_client_ui(void) {
+    // Get username with interruptible input
     char username[USERNAME_SIZE + 1];
     printf("Entrez votre nom d'utilisateur: ");
-    fgets(username, USERNAME_SIZE + 1, stdin);
-    username[strcspn(username, "\n")] = 0;
-    // Send connect request and wait for user data
-    send_connect(username);
+    fflush(stdout);
+
+    char input_buf[USERNAME_SIZE + 2];
+    int ret = read_line_interruptible(input_buf, sizeof(input_buf));
+    if (ret == 1) {
+        strncpy(username, input_buf, USERNAME_SIZE);
+        username[strcspn(username, "\n")] = 0;
+        username[USERNAME_SIZE] = '\0';
+        send_connect(username);
+    }
 
     while (1) {
         // Process any pending network messages
-        process_network_messages();
+        while (process_network_messages()) {
+            // Keep processing until queue is empty
+        }
 
         if (!ui_state.is_connected) {
-            usleep(100000); // 0.1s
+            // Wait for connection with timeout
+            wait_for_network_event(100);
             continue;
         }
 
         // Handle game turn if in game and it's our turn
         if (ui_state.in_game && ui_state.your_turn) {
             handle_game_turn();
+            continue;
+        }
+
+        // Handle waiting for opponent (allows chat while waiting)
+        if (ui_state.in_game && !ui_state.your_turn) {
+            handle_waiting_for_opponent();
             continue;
         }
 
@@ -351,7 +541,7 @@ void run_client_ui(void) {
         // Skip menu if in game or waiting for async response
         if (ui_state.in_game || ui_state.waiting_for_user_list ||
             ui_state.waiting_for_game_list || ui_state.waiting_for_user_profile) {
-            usleep(100000); // 0.1 second
+            wait_for_network_event(100);
             continue;
         }
 
@@ -365,15 +555,20 @@ void run_client_ui(void) {
         printf(" 6 - Gérer mes amis\n");
         printf(" 7 - Définir ma bio\n");
         printf(" 8 - Regarder une partie en cours\n");
-        printf(" 9 - Quitter\n");
+        printf(" 9 - Envoyer un message au lobby\n");
+        printf(" 10 - Quitter\n");
         printf("Votre choix: ");
+        fflush(stdout);
 
         int choice;
         char input_buf[32];
-        if (fgets(input_buf, sizeof(input_buf), stdin) == NULL) {
-            clearerr(stdin);
+        int ret = read_line_interruptible(input_buf, sizeof(input_buf));
+        if (ret == 0) {
+            // Interrupted by network event - process and re-display menu
             continue;
         }
+        if (ret < 0) continue;
+
         if (sscanf(input_buf, "%d", &choice) != 1) {
             printf("Entrée invalide.\n");
             continue;
@@ -397,12 +592,11 @@ void run_client_ui(void) {
                     break;
                 }
                 printf("Entrer l'id de l'adversaire: ");
+                fflush(stdout);
                 int opponent_id;
-                if (fgets(input_buf, sizeof(input_buf), stdin) == NULL) {
-                    clearerr(stdin);
-                    break;
-                }
-                if (sscanf(input_buf, "%d", &opponent_id) != 1) {
+                ret = read_line_interruptible(input_buf, sizeof(input_buf));
+                if (ret == 0) break; // Interrupted
+                if (ret < 0 || sscanf(input_buf, "%d", &opponent_id) != 1) {
                     printf("Entrée invalide.\n");
                     break;
                 }
@@ -413,12 +607,11 @@ void run_client_ui(void) {
 
             case 4:
                 printf("Entrer l'id du joueur: ");
+                fflush(stdout);
                 int user_profile_id;
-                if (fgets(input_buf, sizeof(input_buf), stdin) == NULL) {
-                    clearerr(stdin);
-                    break;
-                }
-                if (sscanf(input_buf, "%d", &user_profile_id) != 1) {
+                ret = read_line_interruptible(input_buf, sizeof(input_buf));
+                if (ret == 0) break; // Interrupted
+                if (ret < 0 || sscanf(input_buf, "%d", &user_profile_id) != 1) {
                     printf("Entrée invalide.\n");
                     break;
                 }
@@ -449,23 +642,20 @@ void run_client_ui(void) {
                 printf("Votre choix: ");
 
                 int friend_choice;
-                if (fgets(input_buf, sizeof(input_buf), stdin) == NULL) {
-                    clearerr(stdin);
-                    break;
-                }
-                if (sscanf(input_buf, "%d", &friend_choice) != 1) {
+                ret = read_line_interruptible(input_buf, sizeof(input_buf));
+                if (ret == 0) break; // Interrupted
+                if (ret < 0 || sscanf(input_buf, "%d", &friend_choice) != 1) {
                     printf("Entrée invalide.\n");
                     break;
                 }
 
                 if (friend_choice == 1) {
                     printf("Entrer l'id du joueur: ");
+                    fflush(stdout);
                     int friend_id;
-                    if (fgets(input_buf, sizeof(input_buf), stdin) == NULL) {
-                        clearerr(stdin);
-                        break;
-                    }
-                    if (sscanf(input_buf, "%d", &friend_id) != 1) {
+                    ret = read_line_interruptible(input_buf, sizeof(input_buf));
+                    if (ret == 0) break; // Interrupted
+                    if (ret < 0 || sscanf(input_buf, "%d", &friend_id) != 1) {
                         printf("Entrée invalide.\n");
                         break;
                     }
@@ -501,11 +691,10 @@ void run_client_ui(void) {
             case 8:
                 int game_id;
                 printf("Entrer l'id de la game: ");
-                if (fgets(input_buf, sizeof(input_buf), stdin) == NULL) {
-                    clearerr(stdin);
-                    break;
-                }
-                if (sscanf(input_buf, "%d", &game_id) != 1) {
+                fflush(stdout);
+                ret = read_line_interruptible(input_buf, sizeof(input_buf));
+                if (ret == 0) break; // Interrupted
+                if (ret < 0 || sscanf(input_buf, "%d", &game_id) != 1) {
                     printf("Entrée invalide.\n");
                     break;
                 }
@@ -513,6 +702,21 @@ void run_client_ui(void) {
 
                 break;
             case 9:
+                printf("Entrez votre message: ");
+                fflush(stdout);
+                char chat_msg[MAX_CHAT_MESSAGE_SIZE];
+                ret = read_line_interruptible(chat_msg, sizeof(chat_msg));
+                if (ret == 0) break; // Interrupted
+                if (ret > 0) {
+                    chat_msg[strcspn(chat_msg, "\n")] = 0;
+                    if (strlen(chat_msg) > 0) {
+                        send_lobby_chat(chat_msg);
+                        printf(">>> Message envoyé au lobby.\n");
+                    }
+                }
+                break;
+
+            case 10:
                 printf("Déconnecté.\n");
                 exit(EXIT_SUCCESS);
 
