@@ -7,6 +7,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 #include "../common/api.h"
+#include "../common/utils.h"
 
 #define PORT 8080
 #define MAX_CLIENTS 10
@@ -60,14 +61,14 @@ void remove_client_by_index(int idx) {
     pthread_mutex_unlock(&clients_mutex);
 }
 
-size_t send_payload(CallType calltype, u_int8_t *payload, size_t payload_size, int fd) {
-    send(fd, &calltype, sizeof(calltype), 0);
-    send(fd, &payload_size, sizeof(int), 0);
+size_t send_payload(CallType calltype, uint8_t *payload, size_t payload_size, int fd) {
+    send(fd, &calltype, sizeof(CallType), 0);
+    send(fd, &payload_size, sizeof(uint32_t), 0);
     return send(fd, payload, payload_size, 0);
 
 }
 
-size_t  end_error(CallType calltype, const char *error_msg, int fd) {
+size_t send_error(CallType calltype, const char *error_msg, int fd) {
 
     size_t msg_len = strlen(error_msg) + 1;
     size_t total_size = sizeof(CallType) + msg_len;
@@ -128,21 +129,17 @@ void free_game(GameInstance *g) {
 
 
 void *game_thread(void *arg) {
-    GameInstance *g = (GameInstance *)arg;
+    GameInstance *g = arg;
 
-    int tours = 0;
+    uint8_t tours = 0;
     size_t n;
     int move_made = -1;
     while (g->running && tours <= MAX_ROUNDS) {
 
-        // if tours%2 ==0 player 1 else player 2
-        // FIRST NOTIFY THE CURRENT PLAYER IT'S THEIR TURN
         Player current_player = (tours % 2 == 0) ? g->game->player1 : g->game->player2;
-        CallType your_turn = YOUR_TURN;
-        //n = send(current_player.fd, &your_turn, sizeof(your_turn), 0);
-        // the first player will receive the number - 1 indicating that he is the first to play, the second will receive any positive number
-        //send(current_player.fd, &move_made, sizeof(move_made), 0);
-        n = send_payload(your_turn, move_made, sizeof(move_made), current_player.fd);
+        uint8_t *payload = malloc(sizeof(uint32_t));
+        write_int32_le(payload, 0, move_made);
+        n = send_payload(YOUR_TURN, payload, sizeof(move_made), current_player.fd);
         printf("Sent YOUR_TURN to player fd %d for game %d\n", current_player.fd, g->game_id);
         if (n <= 0) {
             printf("Player fd %d disconnected, ending game %d\n", current_player.fd, g->game_id);
@@ -413,8 +410,6 @@ int start_server(void) {
                     uint8_t user_buffer[1024] = {0};
                     serialize_User(&user, user_buffer);
                     CallType out = CONNECT_CONFIRM;
-                    //send(clients[i].fd, &out, sizeof(out), 0);
-                    //send(clients[i].fd, user_buffer, sizeof(user_buffer), 0);
                     send_payload(out, user_buffer, sizeof(user_buffer), clients[i].fd);
                     break;
                 }
@@ -683,7 +678,6 @@ int start_server(void) {
                 }
                 case CONSULT_USER_PROFILE: {
                     CallType out = CONSULT_USER_PROFILE;
-                    CallType error = ERROR;
                     int requested_user_id = 0;
                     if (read(clients[i].fd, &requested_user_id, sizeof(int)) <= 0) {
                         close(clients[i].fd); clients[i].active = 0; break;
@@ -764,7 +758,6 @@ int start_server(void) {
                     break;
                 }
                 case WATCH_GAME: {
-                    CallType out = WATCH_GAME;
                     int game_id;
                     if (recv(clients[i].fd, &game_id, sizeof (int), 0) <= 0) {
                         close(clients[i].fd);

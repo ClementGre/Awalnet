@@ -29,7 +29,7 @@ static void network_error(void) {
 }
 
 void *listen_server(void *arg);
-void process_sync_call(CallType type, char* payload);
+void process_sync_call(CallType type, int payload_size, uint8_t* payload);
 
 /*
  * Initialize the connexion and start the network thread
@@ -75,7 +75,7 @@ void *listen_server(void *arg) {
     CallType call_type;
     while (1) {
         // Read CallType
-        size_t n = recv(fd, &call_type, sizeof(call_type), 0);
+        size_t n = recv(fd, &call_type, sizeof(CallType), 0);
         if (n <= 0) network_error();
 
         int is_sync = is_client_sync_CallType(call_type);
@@ -86,14 +86,19 @@ void *listen_server(void *arg) {
         }
 
         // Read Payload size
-        int payload_size;
-        size_t n = recv(fd, &payload_size, sizeof(int), 0);
+        uint32_t payload_size;
+        n = recv(fd, &payload_size, sizeof(uint32_t), 0);
         if (n <= 0) network_error();
 
         // Read Payload
-        char *payload = malloc(sizeof(char) * payload_size);
+        uint8_t *payload = malloc(sizeof(uint8_t) * payload_size);
         n = recv(fd, payload, payload_size, 0);
         if (n <= 0) network_error();
+
+        // Print
+        printf("Receiving CallType %d with payload size %d: ", call_type, payload_size);
+        //for (int i = 0; i < payload_size; i++) printf("%02x", payload[i]);
+        printf("\n");
 
         if (is_async) {
             // Save data
@@ -109,7 +114,7 @@ void *listen_server(void *arg) {
             incoming_payload = payload;
             pthread_mutex_unlock(&incoming_lock);
         } else {
-            process_sync_call(payload_size, payload);
+            process_sync_call(call_type, payload_size, payload);
         }
     }
 }
@@ -204,7 +209,7 @@ void process_network_messages(void) {
     pthread_mutex_unlock(&incoming_lock);
 }
 
-void process_sync_call(CallType type, int payload_size, char* payload) {
+void process_sync_call(CallType type, int payload_size, uint8_t* payload) {
     if (type == CONSULT_USER_PROFILE) {
         if (payload_size != sizeof(int)) {
             printf("Received invalid payload size %d for CallType %d", payload_size, type);

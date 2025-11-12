@@ -1,7 +1,7 @@
 #include "api.h"
 
 // Returns true if the CallType is made to be sent from the client to the server
-int is_server_CallType(CallType type) {
+uint8_t is_server_CallType(CallType type) {
     switch (type) {
         case CONNECT: return 1;
         case CONNECT_CONFIRM: return 0;
@@ -27,11 +27,11 @@ int is_server_CallType(CallType type) {
 
 
 // Returns true if the CallType is made to be sent from the server to the client, and processed in an async way
-int is_client_async_CallType(CallType type) {
+uint8_t is_client_async_CallType(CallType type) {
     switch (type) {
         case CONNECT: return 1;
         case CONNECT_CONFIRM: return 1;
-        case CHALLENGE: return 0;
+        case CHALLENGE: return 1;
         case LIST_USERS: return 1;
         case LIST_GAMES: return 0;
         case CONSULT_USER_PROFILE: return 0;
@@ -52,7 +52,7 @@ int is_client_async_CallType(CallType type) {
 }
 
 // Returns true if the CallType is made to be sent from the server to the client, and processed as an interruption
-int is_client_sync_CallType(CallType type) {
+uint8_t is_client_sync_CallType(CallType type) {
     switch (type) {
         case CONNECT: return 0;
         case CONNECT_CONFIRM: return 0;

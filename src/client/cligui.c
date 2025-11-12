@@ -492,7 +492,7 @@ void run_client_ui(void) {
 
             case 7:
                 printf("Ecrivez votre bio : \n");
-                char bio[BIO_SIZE + 1];
+                char *bio = malloc(sizeof(char) * (BIO_SIZE + 1));
                 scanf("%[^\n]%*c", bio);
                 pthread_mutex_lock(&user_lock);
                 user.bio = bio;

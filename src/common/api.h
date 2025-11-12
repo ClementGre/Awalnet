@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "model.h"
+#include <stdint.h>
 
 typedef enum GAME_OVER_REASON {
     WIN = 1,
@@ -29,29 +30,32 @@ typedef enum CallType {
     LIST_ONGOING_GAMES = 15, // Notify the client with the list of ongoing games
     WATCH_GAME = 16, // Request ongoing game to watch
     ALLOW_CLIENT_TO_WATCH = 17 // Both players in a game have to answer that call when somebody wants to watch their game
-
 } CallType;
 
 // Returns the size of a CallType payload, excluding the CallType itself.
 size_t sizeof_CallType(CallType type);
+
 // Returns true if the CallType is made to send from the client to the server
-int is_server_CallType(CallType type);
+uint8_t is_server_CallType(CallType type);
+
 // Returns true if the CallType is made to be sent from the server to the client, and processed in an async way
-int is_client_async_CallType(CallType type);
+uint8_t is_client_async_CallType(CallType type);
+
 // Returns true if the CallType is made to be sent from the server to the client, and processed as an interruption
-int is_client_sync_CallType(CallType type);
+uint8_t is_client_sync_CallType(CallType type);
 
 // Maybe we could use those error codes to be more specific about what went wrong during a challenge request
-typedef  enum ERROR_CODE {
+typedef enum ERROR_CODE {
     USER_NOT_FOUND = 1,
     USER_OFFLINE = 2,
-    CANNOT_CHALLENGE_YOURSELF =3,
-    ALREADY_IN_GAME =4,
+    CANNOT_CHALLENGE_YOURSELF = 3,
+    ALREADY_IN_GAME = 4,
     UNKNOWN_ERROR = 99
 } ERROR_CODE;
 
 
 // Serialize User struct into a byte buffer
 void serialize_User(User *user, uint8_t *buffer);
+
 // Deserialize a byte buffer into User struct
 void deserialize_User(uint8_t *buffer, User *user);
