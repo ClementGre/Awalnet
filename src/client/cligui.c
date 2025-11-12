@@ -56,6 +56,7 @@ typedef struct UIState {
     // Flags for async responses
     int waiting_for_user_list;
     int waiting_for_game_list;
+    int waiting_for_user_id;
     int waiting_for_user_profile;
     int does_user_exist;
 } UIState;
@@ -470,6 +471,19 @@ void on_challenge_start(char opponent_username[USERNAME_SIZE + 1]) {
     init_game_state();
 }
 
+void on_does_user_exist(int does_exist){
+    ui_state.does_user_exist = does_exist;
+    if (does_exist && ui_state.waiting_for_user_id) {
+        printf("L'utilisateur existe.\n");
+        ui_state.friends[ui_state.nb_friends].user_id = ui_state.waiting_for_user_id;
+        ui_state.nb_friends++;
+
+    } else if (ui_state.waiting_for_user_id) {
+        printf("L'utilisateur n'existe pas.\n");
+    }
+    ui_state.waiting_for_user_id = 0;
+}
+
 void on_your_turn(int move_played) {
     printf("\n>>> Le serveur a notifié que c'est votre tour de jouer.\n");
     ui_state.your_turn = 1;
@@ -540,7 +554,7 @@ void run_client_ui(void) {
 
         // Skip menu if in game or waiting for async response
         if (ui_state.in_game || ui_state.waiting_for_user_list ||
-            ui_state.waiting_for_game_list || ui_state.waiting_for_user_profile) {
+            ui_state.waiting_for_game_list || ui_state.waiting_for_user_profile || ui_state.waiting_for_user_id) {
             wait_for_network_event(100);
             continue;
         }
@@ -659,17 +673,10 @@ void run_client_ui(void) {
                         printf("Entrée invalide.\n");
                         break;
                     }
-                    send_consult_user_profile(friend_id);
-                    ui_state.waiting_for_user_profile = 1;
+                    send_does_user_exist(friend_id);
+                    ui_state.waiting_for_user_id = friend_id;
 
-                    // WAITS FOR THE ANSWER
 
-                    if (ui_state.does_user_exist) {
-                        // add it
-                        //friends
-                        ui_state.friends[ui_state.nb_friends].user_id = friend_id;
-                        ui_state.nb_friends++;
-                    }
                 }
 
                 else if (friend_choice == 2) {

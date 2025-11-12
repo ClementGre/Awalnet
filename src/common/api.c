@@ -24,6 +24,7 @@ uint8_t is_server_CallType(CallType type) {
         case SEND_GAME_CHAT: return 1;
         case RECEIVE_LOBBY_CHAT: return 0;
         case RECEIVE_GAME_CHAT: return 0;
+        case DOES_USER_EXIST : return 1;
     }
     return 0;
 }
@@ -53,6 +54,7 @@ uint8_t is_client_async_CallType(CallType type) {
         case SEND_GAME_CHAT: return 0;
         case RECEIVE_LOBBY_CHAT: return 1;
         case RECEIVE_GAME_CHAT: return 1;
+        case DOES_USER_EXIST : return 1;
     }
     return 0;
 }
@@ -81,6 +83,7 @@ uint8_t is_client_sync_CallType(CallType type) {
         case SEND_GAME_CHAT: return 0;
         case RECEIVE_LOBBY_CHAT: return 0;
         case RECEIVE_GAME_CHAT: return 0;
+        case DOES_USER_EXIST : return 0;
     }
     return 0;
 }

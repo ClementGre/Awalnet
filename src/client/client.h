@@ -19,6 +19,7 @@ void send_user_profile(int request_user_id, uint8_t user_buffer[1024]);
 void send_play_made(int move);
 void send_lobby_chat(const char* message);
 void send_game_chat(const char* message);
+void send_does_user_exist(int user_id);
 
 // Process incoming network messages (returns 1 if processed, 0 if none available)
 int process_network_messages(void);

@@ -204,6 +204,10 @@ int process_network_messages(void) {
         memcpy(buffer, incoming_payload, 1024);
         on_receive_user_profile(buffer);
 
+    } else if (incoming_call_type == DOES_USER_EXIST) {
+        int does_exist = incoming_payload[0] + (incoming_payload[1] << 8) + (incoming_payload[2] << 16) + (incoming_payload[3] << 24);
+        on_does_user_exist(does_exist);
+
     } else if (incoming_call_type == CHALLENGE_START) {
         // the challenge has started
         char opponent_username[USERNAME_SIZE + 1] = {0};
@@ -340,4 +344,10 @@ void send_game_chat(const char* message) {
 
     if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send ct");
     if (send(client_fd, msg_buffer, MAX_CHAT_MESSAGE_SIZE, 0) <= 0) perror("send message");
+}
+
+void send_does_user_exist(int user_id) {
+    CallType ct = DOES_USER_EXIST;
+    if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send ct");
+    if (send(client_fd, &user_id, sizeof(int), 0) <= 0) perror("send response");
 }

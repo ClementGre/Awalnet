@@ -24,3 +24,4 @@ void on_your_turn(int move_played);
 void on_game_over(GAME_OVER_REASON reason);
 void on_receive_lobby_chat(int sender_id, char sender_username[USERNAME_SIZE + 1], char message[MAX_CHAT_MESSAGE_SIZE]);
 void on_receive_game_chat(int sender_id, char sender_username[USERNAME_SIZE + 1], char message[MAX_CHAT_MESSAGE_SIZE]);
+void on_does_user_exist(int does_exist);

@@ -732,6 +732,7 @@ int start_server(void) {
                 case CONSULT_USER_PROFILE: {
                     CallType out = CONSULT_USER_PROFILE;
                     int requested_user_id = 0;
+                    int exists = 0;
                     if (read(clients[i].fd, &requested_user_id, sizeof(int)) <= 0) {
                         close(clients[i].fd); clients[i].active = 0; break;
                     }
@@ -754,11 +755,13 @@ int start_server(void) {
                     for (int j = 0; j < MAX_CLIENTS; j++) {
                         if (clients[j].active && clients[j].user_id == requested_user_id) {
                             target = j;
+                            exists = 1;
                             break;
                         }
                     }
                     if (target != -1) {
                         send_payload(out, &clients[i].user_id, sizeof(int), clients[target].fd);
+
                         /*
                         send(clients[target].fd, &out, sizeof(out), 0);
                         send(clients[target].fd, &clients[i].user_id, sizeof(int), 0);
@@ -776,6 +779,41 @@ int start_server(void) {
                         send(clients[i].fd, error_msg, sizeof(error_msg), 0);
                          */
                     }
+
+                    break;
+                }
+                case DOES_USER_EXIST: {
+                    CallType out = DOES_USER_EXIST;
+                    int requested_user_id = 0;
+                    int exists = 0;
+                    if (read(clients[i].fd, &requested_user_id, sizeof(int)) <= 0) {
+                        close(clients[i].fd); clients[i].active = 0; break;
+                    }
+                    if(requested_user_id == clients[i].user_id) {
+                        printf("User %s (id = %d) attempted to request add themselves as friend. Ignored.\n",
+                               clients[i].username, clients[i].user_id);
+                        char error_msg[] = "You cannot add yourself as friend";
+                        int previous_call = DOES_USER_EXIST;
+
+                        send_error(previous_call, error_msg, clients[i].fd);
+                        /*
+                        send(clients[i].fd, &error, sizeof(error), 0);
+                        send(clients[i].fd, &previous_call, sizeof (previous_call), 0);
+                        send(clients[i].fd, error_msg, sizeof(error_msg), 0);
+                         */
+                        break;
+                    }
+                    // Find target client by user_id and send them the request to send their profile
+                    int target = -1;
+                    for (int j = 0; j < MAX_CLIENTS; j++) {
+                        if (clients[j].active && clients[j].user_id == requested_user_id) {
+                            target = j;
+                            exists = 1;
+                            break;
+                        }
+                    }
+                    printf("User existence check for id=%d by %s(id=%d): %s\n", requested_user_id, clients[i].username, clients[i].user_id,   exists ? "EXISTS" : "DOES NOT EXIST");
+                    send_payload(out, &exists, sizeof(int), clients[i].fd);
                     break;
                 }
                 case SENT_USER_PROFILE:{
