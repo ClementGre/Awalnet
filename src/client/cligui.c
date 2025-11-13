@@ -434,6 +434,10 @@ void on_error(int previous_call, char error_msg[256]) {
         case LIST_ONGOING_GAMES:
             ui_state.waiting_for_game_list = 0;
             break;
+        case DOES_USER_EXIST:
+            ui_state.waiting_for_user_id = 0;
+            ui_state.does_user_exist = 0;
+            break;
         default:
             break;
     }
@@ -474,12 +478,13 @@ void on_challenge_start(char opponent_username[USERNAME_SIZE + 1]) {
 void on_does_user_exist(int does_exist){
     ui_state.does_user_exist = does_exist;
     if (does_exist && ui_state.waiting_for_user_id) {
-        printf("L'utilisateur existe.\n");
+        printf("Nouvel ami ajouté!\n");
         ui_state.friends[ui_state.nb_friends].user_id = ui_state.waiting_for_user_id;
         ui_state.nb_friends++;
 
-    } else if (ui_state.waiting_for_user_id) {
+    } else if (!does_exist && ui_state.waiting_for_user_id) {
         printf("L'utilisateur n'existe pas.\n");
+        ui_state.waiting_for_user_id = 0;
     }
     ui_state.waiting_for_user_id = 0;
 }
@@ -682,6 +687,33 @@ void run_client_ui(void) {
                 else if (friend_choice == 2) {
                     if (ui_state.nb_friends == 0) {
                         printf("Vous n'avez aucun ami à supprimer\n");
+                        break;
+                    } else {
+                        printf("Entrer l'id de l'ami à supprimer: ");
+                        fflush(stdout);
+                        int friend_id;
+                        ret = read_line_interruptible(input_buf, sizeof(input_buf));
+                        if (ret == 0) break; // Interrupted
+                        if (ret < 0 || sscanf(input_buf, "%d", &friend_id) != 1) {
+                            printf("Entrée invalide.\n");
+                            break;
+                        }
+                        int found = 0;
+                        for (int i = 0; i < ui_state.nb_friends; i++) {
+                            if (ui_state.friends[i].user_id == friend_id) {
+                                // Remove friend by shifting array
+                                for (int j = i; j < ui_state.nb_friends - 1; j++) {
+                                    ui_state.friends[j] = ui_state.friends[j + 1];
+                                }
+                                ui_state.nb_friends--;
+                                found = 1;
+                                printf("Ami supprimé.\n");
+                                break;
+                            }
+                        }
+                        if (!found) {
+                            printf("Ami non trouvé dans votre liste.\n");
+                        }
                     }
                 }
                 break;
