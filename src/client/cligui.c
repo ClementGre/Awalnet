@@ -717,8 +717,8 @@ void run_client_ui(void) {
         printf(" 7 - Définir ma bio\n");
         printf(" 8 - Regarder une partie en cours\n");
         printf(" 9 - Envoyer un message au lobby\n");
-        printf(" 10 - Modifier les droits de visionnage\n");
-        printf(" 11 - Quitter\n");
+        //printf(" 10 - Modifier les droits de visionnage\n");
+        printf(" 10 - Quitter\n");
         if (ui_state.game_watch) {
             printf("    (En ce moment, vous regardez une partie en cours... tapez 12 pour arrêter)\n");
         }
@@ -918,6 +918,7 @@ void run_client_ui(void) {
                 }
                 break;
 
+                /*
             case 10:
                 if (ui_state.allow_anybody_to_watch) {
                     printf("Vous avez actuellement autorisé tout le monde à regarder vos parties en cours.\n");
@@ -950,7 +951,8 @@ void run_client_ui(void) {
                         printf("Vous avez autorisé tout le monde à regarder vos parties en cours.\n");
                     }
                 }
-            case 11:
+                 */
+            case 10:
                 printf("Déconnecté.\n");
                 exit(EXIT_SUCCESS);
 

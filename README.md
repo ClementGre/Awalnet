@@ -117,9 +117,9 @@ When a player challenges another player, if he receives a challenge and has not 
 
 ✅ You can add features such as listing ongoing games 
 
-❌ and an “observer” mode where the server sends the board and score to C who observes the game between A and B.
+✅ and an “observer” mode where the server sends the board and score to C who observes the game between A and B.
 
-❌ Implement a chat option, in addition to sending moves, players can exchange messages to chat (both inside and outside a game).
+✅ Implement a chat option, in addition to sending moves, players can exchange messages to chat (both inside and outside a game).
 
 ✅ Allow a player to write a bio, say 10 ASCII lines to introduce themselves. The server should be able to display the bio of a given username.
 
