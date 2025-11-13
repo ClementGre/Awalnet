@@ -109,9 +109,9 @@ void *listen_server(void *arg) {
         if (n <= 0) network_error();
 
         // Print
-        printf("Receiving CallType %d with payload size %d: ", call_type, payload_size);
+        //printf("Receiving CallType %d with payload size %d: ", call_type, payload_size);
         //for (int i = 0; i < payload_size; i++) printf("%02x", payload[i]);
-        printf("\n");
+        //printf("\n");
 
         if (is_async) {
             // Save data
@@ -185,10 +185,6 @@ int process_network_messages(void) {
     } else if (incoming_call_type == SUCCESS) {
         // confirmation of a successful previous call
         on_success();
-
-    } else if (incoming_call_type == USER_WANTS_TO_WATCH) {
-        int user_id = incoming_payload[0] + (incoming_payload[1] << 8) + (incoming_payload[2] << 16) + (incoming_payload[3] << 24);
-        on_user_wants_to_watch(user_id);
 
     } else if (incoming_call_type == WATCH_GAME_ANSWER){
         int answer = incoming_payload[0] + (incoming_payload[1] << 8) + (incoming_payload[2] << 16) + (incoming_payload[3] << 24);
@@ -273,6 +269,9 @@ void process_sync_call(CallType type, int payload_size, uint8_t* payload) {
         // we need to sent our user profile to the server because somebody requested it
         int request_user_id = payload[0] + (payload[1] << 8) + (payload[2] << 16) + (payload[3] << 24);
         interrupt_consult_user_profile(request_user_id);
+    }else if (type == USER_WANTS_TO_WATCH) {
+        int user_id = payload[0] + (payload[1] << 8) + (payload[2] << 16) + (payload[3] << 24);
+        interrupt_user_wants_to_watch(user_id);
     }
 }
 

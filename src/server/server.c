@@ -65,11 +65,9 @@ size_t send_payload(CallType calltype, uint8_t *payload, size_t payload_size, in
     send(fd, &calltype, sizeof(CallType), 0);
     send(fd, &payload_size, sizeof(uint32_t), 0);
     return send(fd, payload, payload_size, 0);
-
 }
 
 size_t send_error(CallType calltype, const char *error_msg, int fd) {
-
     size_t msg_len = strlen(error_msg) + 1;
     size_t total_size = sizeof(CallType) + msg_len;
 
@@ -82,7 +80,6 @@ size_t send_error(CallType calltype, const char *error_msg, int fd) {
     memcpy(buffer + sizeof(CallType), error_msg, msg_len);
 
     return send_payload(ERROR, buffer, total_size, fd);
-
 }
 
 
@@ -119,7 +116,7 @@ GameInstance *alloc_game(void) {
 }
 
 void free_game(GameInstance *g) {
-    if (!g){
+    if (!g) {
         return;
     }
     for (int i = 0; i < MAX_GAMES; ++i) {
@@ -133,7 +130,6 @@ void free_game(GameInstance *g) {
 }
 
 
-
 void *game_thread(void *arg) {
     GameInstance *g = arg;
 
@@ -141,7 +137,6 @@ void *game_thread(void *arg) {
     size_t n;
     int move_made = -1;
     while (g->running && tours <= MAX_ROUNDS) {
-
         Player current_player = (tours % 2 == 0) ? g->game->player1 : g->game->player2;
         uint8_t *payload = malloc(sizeof(uint32_t));
         write_int32_le(payload, 0, move_made);
@@ -186,7 +181,6 @@ void *game_thread(void *arg) {
                 send_payload(go, &gameOverReason, sizeof(gameOverReason), opponent_fd);
                 /*send(opponent_fd, &go, sizeof(go), 0);
                 send(opponent_fd, &gameOverReason, sizeof(gameOverReason), 0);*/
-
             }
             break;
         }
@@ -254,68 +248,57 @@ void *game_thread(void *arg) {
             }
         }
 
-        if  (incoming == ALLOW_WATCHER) {
-                int watcher_user_id;
-                if (recv(current_player.fd, &watcher_user_id, sizeof (int), 0) <= 0) {
-                    perror("allow watcher autorisation");
-                    break;
-                }
-                // then fetch watcher fd
-                int watcher_fd = -1;
-                for (int j = 0; j < MAX_CLIENTS; j++) {
-                    if (clients[j].active && clients[j].user_id == watcher_user_id && !clients[j].in_game) {
-                        watcher_fd = clients[j].fd;
-                        break;
-                    }
-                }
-                if (watcher_fd == -1) {
-                    printf("Watcher %d not found or is in game\n", watcher_user_id);
-                    break;
-                }
-                // we need to find the game of the player who answered
-
-                // then checks if he accepted or had previously been accepted by the other player
-                for (int i = 0; i< g->num_watchers; i++) {
-                    if (g->watchers_fd[i] == watcher_user_id) {
-                        printf("Watcher %d was already accepted to watch game %d\n", watcher_user_id, g->game_id);
-                        break;
-                    }
-                }
-                // then sends him the answer
-                int answer;
-                if (recv(current_player.fd, &answer, sizeof (int), 0) <= 0) {
-                    perror("recv watcher answer");
-                    break;
-                }
-                printf("Game %d player fd %d answered %d to watcher %d\n", g->game_id, current_player.fd, answer, watcher_user_id);
-                CallType out = WATCH_GAME_ANSWER;
-                // we send him the answer
-                send_payload(out, &answer, sizeof(int), watcher_fd);
-                continue;
-
+        if (incoming == ALLOW_WATCHER) {
+            int watcher_user_id;
+            if (recv(current_player.fd, &watcher_user_id, sizeof(int), 0) <= 0) {
+                perror("allow watcher autorisation");
+                break;
             }
+            // then fetch watcher fd
+            int watcher_fd = -1;
+            for (int j = 0; j < MAX_CLIENTS; j++) {
+                if (clients[j].active && clients[j].user_id == watcher_user_id && !clients[j].in_game) {
+                    watcher_fd = clients[j].fd;
+                    break;
+                }
+            }
+            if (watcher_fd == -1) {
+                printf("Watcher %d not found or is in game\n", watcher_user_id);
+                break;
+            }
+            // we need to find the game of the player who answered
 
-
-
-
-        else {
-            // Unexpected message: ignore or log
-            printf("Game %d received unexpected pack from fd %d: %d\n", g->game_id, current_player.fd, incoming);
+            // then checks if he accepted or had previously been accepted by the other player
+            for (int i = 0; i < g->num_watchers; i++) {
+                if (g->watchers_fd[i] == watcher_user_id) {
+                    printf("Watcher %d was already accepted to watch game %d\n", watcher_user_id, g->game_id);
+                    break;
+                }
+            }
+            // then sends him the answer
+            int answer;
+            if (recv(current_player.fd, &answer, sizeof(int), 0) <= 0) {
+                perror("recv watcher answer");
+                break;
+            }
+            printf("Game %d player fd %d answered %d to watcher %d\n", g->game_id, current_player.fd, answer, watcher_user_id);
+            CallType out = WATCH_GAME_ANSWER;
+            // we send him the answer
+            send_payload(out, &answer, sizeof(int), watcher_fd);
+            continue;
         }
 
         // then process the move to update to board and scores
         if (tours % 2 == 0) {
             // if the first player played
-            int position_of_last_put_seed = moveSeeds(g->game, move_made  - 1);
+            int position_of_last_put_seed = moveSeeds(g->game, move_made - 1);
             g->game->player1.score += collectSeedsAndCountPoints(g->game, position_of_last_put_seed, 1);
             printf("SCORE : Player 1: %d | Player 2: %d  (game %d)\n", g->game->player1.score, g->game->player2.score, g->game_id);
-        }
-        else {
+        } else {
             // the second player made the last move
             int position_of_last_put_seed = moveSeeds(g->game, move_made + 5);
             g->game->player2.score += collectSeedsAndCountPoints(g->game, position_of_last_put_seed, 2);
             printf("SCORE : Player 1: %d | Player 2: %d  (game %d)\n", g->game->player1.score, g->game->player2.score, g->game_id);
-
         }
 
         // then checks for win conditions
@@ -363,7 +346,6 @@ void *game_thread(void *arg) {
         }
 
         tours++;
-
     }
 
     // we end the game by freeing the game instance but before that we need to set the clients as not in game anymore
@@ -424,10 +406,9 @@ int start_server(void) {
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(PORT);
 
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+    if (bind(server_fd, (struct sockaddr *) &address, sizeof(address)) < 0) {
         perror("bind failed");
         exit(EXIT_FAILURE);
-
     }
 
     if (listen(server_fd, 3) < 0) {
@@ -458,14 +439,13 @@ int start_server(void) {
         if (activity < 0) {
             perror("select failed");
             continue;
-        }
-        else if (activity == 0) {
+        } else if (activity == 0) {
             continue;
         }
 
         // new connection
         if (FD_ISSET(server_fd, &read_fds)) {
-            int new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen);
+            int new_socket = accept(server_fd, (struct sockaddr *) &address, (socklen_t *) &addrlen);
             if (new_socket < 0) {
                 perror("accept failed");
                 continue;
@@ -521,9 +501,11 @@ int start_server(void) {
                     CallType error = ERROR;
                     int opponent_user_id = 0;
                     if (read(clients[i].fd, &opponent_user_id, sizeof(int)) <= 0) {
-                        close(clients[i].fd); clients[i].active = 0; break;
+                        close(clients[i].fd);
+                        clients[i].active = 0;
+                        break;
                     }
-                    if(opponent_user_id == clients[i].user_id) {
+                    if (opponent_user_id == clients[i].user_id) {
                         printf("User %s (id=%d) attempted to challenge themselves. Ignored.\n",
                                clients[i].username, clients[i].user_id);
                         char error_msg[] = "You cannot challenge yourself.";
@@ -556,7 +538,8 @@ int start_server(void) {
                         CallType out = CHALLENGE;
                         clients[target].pending_challenge_from_user_fd[clients[target].nb_of_pending_challenges] = clients[i].fd;
                         clients[target].nb_of_pending_challenges++;
-                        printf("User %s (id=%d) has %d pending challenges.\n",  clients[target].username, clients[target].user_id, clients[target].nb_of_pending_challenges);
+                        printf("User %s (id=%d) has %d pending challenges.\n", clients[target].username, clients[target].user_id,
+                               clients[target].nb_of_pending_challenges);
                         // we need to send the info in a buffer like this:
                         uint8_t buffer[sizeof(int) + USERNAME_SIZE + 1];
                         memcpy(buffer, &clients[i].user_id, sizeof(int));
@@ -567,7 +550,6 @@ int start_server(void) {
                         send(clients[target].fd, clients[i].username, USERNAME_SIZE + 1, 0);*/
                         printf("Challenge initialized by de %s(id=%d) to %s(id=%d) | socket %d to bind\n",
                                clients[i].username, clients[i].user_id, clients[target].username, clients[target].user_id, clients[target].fd);
-
                     } else {
                         printf("Utilisateur %d introuvable pour challenge.\n", opponent_user_id);
                         char error_msg[] = "User not found or not online.";
@@ -590,7 +572,7 @@ int start_server(void) {
                         break;
                     }
 
-                    int answer = - 1;
+                    int answer = -1;
                     if (read(clients[i].fd, &answer, sizeof(answer)) <= 0) {
                         close(clients[i].fd);
                         clients[i].active = 0;
@@ -672,10 +654,10 @@ int start_server(void) {
                             clients[target].in_game = 1;
 
                             // randomly decide who starts
-                            srand((unsigned int)time(NULL));
+                            srand((unsigned int) time(NULL));
                             int starter = rand() % 2; // 0 or 1
                             Player player1, player2;
-                            if (starter){
+                            if (starter) {
                                 player1 = newPlayer(clients[i].user_id, clients[i].fd);
                                 player2 = newPlayer(clients[target].user_id, clients[target].fd);
                             } else {
@@ -684,7 +666,7 @@ int start_server(void) {
                             }
 
                             // Create game instance
-                            Game* game = newGame(&player1, &player2);
+                            Game *game = newGame(&player1, &player2);
 
                             // Then create a thread to handle the game logic
                             GameInstance *g = alloc_game();
@@ -705,11 +687,7 @@ int start_server(void) {
 
                             printf("Game %d created between %d and %d (fds %d & %d)\n",
                                    g->game_id, g->game->player1.user_id, g->game->player2.user_id, g->game->player1.fd, g->game->player2.fd);
-
-
                         }
-
-
                     } else {
                         printf("Utilisateur %d introuvable pour challenge.\n", request_user_id);
                         char error_msg[] = "User not found or not online.";
@@ -785,9 +763,11 @@ int start_server(void) {
                     int requested_user_id = 0;
                     int exists = 0;
                     if (read(clients[i].fd, &requested_user_id, sizeof(int)) <= 0) {
-                        close(clients[i].fd); clients[i].active = 0; break;
+                        close(clients[i].fd);
+                        clients[i].active = 0;
+                        break;
                     }
-                    if(requested_user_id == clients[i].user_id) {
+                    if (requested_user_id == clients[i].user_id) {
                         printf("User %s (id = %d) attempted to request their own profile. Ignored.\n",
                                clients[i].username, clients[i].user_id);
                         char error_msg[] = "To view your own profile, press 1.";
@@ -838,9 +818,11 @@ int start_server(void) {
                     int requested_user_id = 0;
                     int exists = 0;
                     if (read(clients[i].fd, &requested_user_id, sizeof(int)) <= 0) {
-                        close(clients[i].fd); clients[i].active = 0; break;
+                        close(clients[i].fd);
+                        clients[i].active = 0;
+                        break;
                     }
-                    if(requested_user_id == clients[i].user_id) {
+                    if (requested_user_id == clients[i].user_id) {
                         printf("User %s (id = %d) attempted to request add themselves as friend. Ignored.\n",
                                clients[i].username, clients[i].user_id);
                         char error_msg[] = "You cannot add yourself as friend";
@@ -863,21 +845,22 @@ int start_server(void) {
                             break;
                         }
                     }
-                    printf("User existence check for id=%d by %s(id=%d): %s\n", requested_user_id, clients[i].username, clients[i].user_id,   exists ? "EXISTS" : "DOES NOT EXIST");
+                    printf("User existence check for id=%d by %s(id=%d): %s\n", requested_user_id, clients[i].username, clients[i].user_id,
+                           exists ? "EXISTS" : "DOES NOT EXIST");
                     send_payload(out, &exists, sizeof(int), clients[i].fd);
                     break;
                 }
-                case SENT_USER_PROFILE:{
+                case SENT_USER_PROFILE: {
                     CallType out = RECEIVE_USER_PROFILE;
                     int request_user_id;
-                    if (recv(clients[i].fd, &request_user_id, sizeof (int), 0) <= 0) {
+                    if (recv(clients[i].fd, &request_user_id, sizeof(int), 0) <= 0) {
                         close(clients[i].fd);
                         clients[i].active = 0;
                         break;
                     }
                     // we get the user_profile serialized
                     uint8_t buffer[1024] = {0};
-                    if (recv(clients[i].fd,  buffer, sizeof(buffer), 0) <= 0) {
+                    if (recv(clients[i].fd, buffer, sizeof(buffer), 0) <= 0) {
                         perror("recv failed");
                         exit(EXIT_FAILURE);
                     }
@@ -901,7 +884,7 @@ int start_server(void) {
                 }
                 case WATCH_GAME: {
                     int game_id;
-                    if (recv(clients[i].fd, &game_id, sizeof (int), 0) <= 0) {
+                    if (recv(clients[i].fd, &game_id, sizeof(int), 0) <= 0) {
                         close(clients[i].fd);
                         clients[i].active = 0;
                         break;

@@ -58,7 +58,7 @@ uint8_t is_client_async_CallType(CallType type) {
         case RECEIVE_LOBBY_CHAT: return 1;
         case RECEIVE_GAME_CHAT: return 1;
         case DOES_USER_EXIST : return 1;
-        case USER_WANTS_TO_WATCH : return 1;
+        case USER_WANTS_TO_WATCH : return 0;
         case ALLOW_WATCHER : return 0;
         case WATCH_GAME_ANSWER : return 1;
     }
@@ -90,8 +90,8 @@ uint8_t is_client_sync_CallType(CallType type) {
         case RECEIVE_LOBBY_CHAT: return 0;
         case RECEIVE_GAME_CHAT: return 0;
         case DOES_USER_EXIST : return 0;
-        case USER_WANTS_TO_WATCH : return 0;
-        case ALLOW_WATCHER : return 1;
+        case USER_WANTS_TO_WATCH : return 1;
+        case ALLOW_WATCHER : return 0;
         case WATCH_GAME_ANSWER : return 0;
 
     }

@@ -9,6 +9,7 @@ void run_client_ui(void);
 
 // Interruptions called by client.c that are called from the server thread and that should take action immediately.
 void interrupt_consult_user_profile(int request_user_id);
+void interrupt_user_wants_to_watch(int user_id);
 
 // Handler functions called by client.c when messages are received
 void on_connected(User user);
@@ -25,5 +26,4 @@ void on_game_over(GAME_OVER_REASON reason);
 void on_receive_lobby_chat(int sender_id, char sender_username[USERNAME_SIZE + 1], char message[MAX_CHAT_MESSAGE_SIZE]);
 void on_receive_game_chat(int sender_id, char sender_username[USERNAME_SIZE + 1], char message[MAX_CHAT_MESSAGE_SIZE]);
 void on_does_user_exist(int does_exist);
-void on_user_wants_to_watch(int user_id);
 void on_watch_game_answer(int answer);

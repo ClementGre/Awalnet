@@ -393,6 +393,34 @@ void interrupt_consult_user_profile(int request_user_id) {
 
 }
 
+void interrupt_user_wants_to_watch(int user_id) {
+    printf("\n>>> L'utilisateur %d souhaite regarder votre partie en cours.\n", user_id);
+    // we check if user_id is one of our friends
+    int is_friend = 0;
+    if (ui_state.allow_anybody_to_watch){
+        // if we allow anybody to watch, we accept directly
+        printf("Vous autorisez %d à regarder votre partie en cours (vous avez autorisé tout le monde).\n", user_id);
+        is_friend = 1;
+        send_game_watch_answer(user_id, is_friend);
+        return;
+
+    }
+    for (int i = 0; i < ui_state.nb_friends; i++)
+    {
+        if (ui_state.friends[i].user_id == user_id) {
+            is_friend = 1;
+            break;
+        }
+    }
+    if (is_friend) {
+        printf("Vous autorisez %d à regarder votre partie en cours (c'est un de vos amis).\n", user_id);
+    } else {
+        printf("Vous n'autorisez pas %d à regarder votre partie en cours (ce n'est pas un de vos amis).\n", user_id);
+    }
+    send_game_watch_answer(user_id, is_friend);
+
+}
+
 void on_connected(User usr) {
     ui_state.is_connected = 1;
     pthread_mutex_lock(&user_lock);
@@ -516,34 +544,6 @@ void on_receive_lobby_chat(int sender_id, char sender_username[USERNAME_SIZE + 1
 void on_receive_game_chat(int sender_id, char sender_username[USERNAME_SIZE + 1], char message[MAX_CHAT_MESSAGE_SIZE]) {
     printf("\n[GAME] %s: %s\n", sender_username, message);
     fflush(stdout);
-}
-
-void on_user_wants_to_watch(int user_id) {
-    printf("\n>>> L'utilisateur %d souhaite regarder votre partie en cours.\n", user_id);
-    // we check if user_id is one of our friends
-    int is_friend = 0;
-    if (ui_state.allow_anybody_to_watch){
-        // if we allow anybody to watch, we accept directly
-        printf("Vous autorisez %d à regarder votre partie en cours (vous avez autorisé tout le monde).\n", user_id);
-        is_friend = 1;
-        send_game_watch_answer(user_id, is_friend);
-        return;
-
-    }
-    for (int i = 0; i < ui_state.nb_friends; i++)
-    {
-        if (ui_state.friends[i].user_id == user_id) {
-            is_friend = 1;
-            break;
-        }
-    }
-    if (is_friend) {
-        printf("Vous autorisez %d à regarder votre partie en cours (c'est un de vos amis).\n", user_id);
-    } else {
-        printf("Vous n'autorisez pas %d à regarder votre partie en cours (ce n'est pas un de vos amis).\n", user_id);
-    }
-    send_game_watch_answer(user_id, is_friend);
-
 }
 
 void on_watch_game_answer(int answer) {
