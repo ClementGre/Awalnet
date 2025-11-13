@@ -39,7 +39,11 @@ typedef enum CallType {
     DOES_USER_EXIST = 22, // Server response to DOES_USER_EXIST to inform whether or not the user exists
     USER_WANTS_TO_WATCH = 23, // Notify both players that a user wants to watch their game
     ALLOW_WATCHER = 24, // Notify the watcher that he is allowed (or not) to watch the game
-    WATCH_GAME_ANSWER = 25 // Answer to WATCH_GAME to inform wether or not we accept the watch request
+    WATCH_GAME_ANSWER = 25, // Answer to WATCH_GAME to inform wether or not we accept the watch request
+    PLAY_MADE_WATCHER = 26, // Sends to the watchers the play made
+    USER_WANTS_TO_EXIT_WATCH = 27, // Notify server that the watcher wants to stop watching the game
+    GAME_OVER_WATCHER = 28 // Notify the watchers that the game is over
+
 
 } CallType;
 

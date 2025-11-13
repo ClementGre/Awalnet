@@ -142,6 +142,15 @@ void *game_thread(void *arg) {
         write_int32_le(payload, 0, move_made);
         n = send_payload(YOUR_TURN, payload, sizeof(move_made), current_player.fd);
         printf("Sent YOUR_TURN to player fd %d for game %d\n", current_player.fd, g->game_id);
+        // also send to watchers
+        for (int w = 0; w < g->num_watchers; ++w) {
+            int watcher_fd = g->watchers_fd[w];
+            n = send_payload(PLAY_MADE_WATCHER, payload, sizeof(move_made), watcher_fd);
+            printf("Sent PLAY_MADE_WATCHER to watcher fd %d for game %d\n", watcher_fd, g->game_id);
+        }
+
+        free(payload);
+
         if (n <= 0) {
             printf("Player fd %d disconnected, ending game %d\n", current_player.fd, g->game_id);
             int idx = find_client_index_by_fd(current_player.fd);
@@ -181,6 +190,13 @@ void *game_thread(void *arg) {
                 send_payload(go, &gameOverReason, sizeof(gameOverReason), opponent_fd);
                 /*send(opponent_fd, &go, sizeof(go), 0);
                 send(opponent_fd, &gameOverReason, sizeof(gameOverReason), 0);*/
+
+                // notify watchers
+                for (int w = 0; w < g->num_watchers; ++w) {
+                    int watcher_fd = g->watchers_fd[w];
+                    send_payload(GAME_OVER_WATCHER, &gameOverReason, sizeof(gameOverReason), watcher_fd);
+                    printf("Sent GAME_OVER_WATCHER to watcher fd %d for game %d\n", watcher_fd, g->game_id);
+                }
             }
             break;
         }
@@ -305,10 +321,18 @@ void *game_thread(void *arg) {
         if (g->game->player1.score == WINNING_SCORE || playerSeedsLeft(g->game, 2) < 6) {
             printf("\n---------------- PLAYER 1 WON !!! --------------\n");
             CallType go = GAME_OVER;
+            CallType goWatcher = GAME_OVER_WATCHER;
             GAME_OVER_REASON win = WIN;
             GAME_OVER_REASON lose = LOSE;
             send_payload(go, &win, sizeof(win), g->game->player1.fd);
             send_payload(go, &lose, sizeof(lose), g->game->player2.fd);
+            // also notify watchers
+            for (int w = 0; w < g->num_watchers; ++w) {
+                int watcher_fd = g->watchers_fd[w];
+                send_payload(goWatcher, &win, sizeof(win), watcher_fd);
+                printf("Sent GAME_OVER_WATCHER to watcher fd %d for game %d\n", watcher_fd, g->game_id);
+            }
+
             /*send(g->game->player1.fd, &go, sizeof(go), 0);
             send(g->game->player1.fd, &win, sizeof(win), 0);
             send(g->game->player2.fd, &go, sizeof(go), 0);
@@ -333,10 +357,19 @@ void *game_thread(void *arg) {
             printf("\n---------------- PLAYER 2 WON !!! --------------\n");
 
             CallType go = GAME_OVER;
+            CallType goWatcher = GAME_OVER_WATCHER;
+
             GAME_OVER_REASON win = WIN;
             GAME_OVER_REASON lose = LOSE;
             send_payload(go, &lose, sizeof(lose), g->game->player1.fd);
             send_payload(go, &win, sizeof(win), g->game->player2.fd);
+
+            // also notify watchers
+            for (int w = 0; w < g->num_watchers; ++w) {
+                int watcher_fd = g->watchers_fd[w];
+                send_payload(goWatcher, &lose, sizeof(win), watcher_fd);
+                printf("Sent GAME_OVER_WATCHER to watcher fd %d for game %d\n", watcher_fd, g->game_id);
+            }
             /*send(g->game->player1.fd, &go, sizeof(go), 0);
             send(g->game->player1.fd, &lose, sizeof(lose), 0);
             send(g->game->player2.fd, &go, sizeof(go), 0);
@@ -370,10 +403,19 @@ void *game_thread(void *arg) {
         send_payload(go, &gameOverReason, sizeof(gameOverReason), g->game->player1.fd);
         send_payload(go, &gameOverReason, sizeof(gameOverReason), g->game->player2.fd);
         /*
+         *
         send(g->game->player1.fd, &go, sizeof(go), 0);
         send(g->game->player1.fd, &gameOverReason, sizeof(gameOverReason), 0);
         send(g->game->player2.fd, &go, sizeof(go), 0);
         send(g->game->player2.fd, &gameOverReason, sizeof(gameOverReason), 0);*/
+        CallType goWatcher = GAME_OVER_WATCHER;
+        // also notify watchers
+        for (int w = 0; w < g->num_watchers; ++w
+        ) {
+            int watcher_fd = g->watchers_fd[w];
+            send_payload(goWatcher, &gameOverReason, sizeof(gameOverReason), watcher_fd);
+            printf("Sent GAME_OVER_WATCHER to watcher fd %d for game %d\n", watcher_fd, g->game_id);
+        }
         printf("Game %d ended in a draw due to max rounds reached\n", g->game_id);
     }
 
@@ -758,6 +800,46 @@ int start_server(void) {
                      */
                     break;
                 }
+
+
+                case USER_WANTS_TO_EXIT_WATCH : {
+                    // we need to delete the user from the game_id he is watching
+                    int game_id = 0;
+                    if (read(clients[i].fd, &game_id, sizeof(int)) <=
+                        0) {
+                        close(clients[i].fd);
+                        clients[i].active = 0;
+                        break;
+                    }
+                    GameInstance *g = games[game_id - 1];
+                    if (g == NULL) {
+                        printf("Game %d not found for watcher exit\n", game_id);
+                        break;
+                    }
+                    // we need to remove the watcher from the watchers_fd array
+                    int found = 0;
+                    for (int w = 0; w < g->num_watchers; w++) {
+                        if (g->watchers_fd[w] == clients[i].fd) {
+                            // shift left
+                            for (int k = w; k < g->num_watchers - 1; k++) {
+                                g->watchers_fd[k] = g->watchers_fd[k + 1];
+                            }
+                            g->num_watchers--;
+                            found = 1;
+                            printf("Watcher %s (id=%d) exited watching game %d\n", clients[i].username,
+                                   clients[i].user_id, game_id);
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        printf("Watcher %s (id=%d) was not found in watchers of game %d\n", clients[i].username,
+                               clients[i].user_id, game_id);
+                    }
+
+                    break;
+                }
+
+
                 case CONSULT_USER_PROFILE: {
                     CallType out = CONSULT_USER_PROFILE;
                     int requested_user_id = 0;
@@ -900,10 +982,15 @@ int start_server(void) {
                         break;
                     }
                     // then fetch players in the game and asks them to allow or not
-                    CallType user_request = USER_WANTS_TO_WATCH;
-                    send_payload(user_request, &clients[i].user_id, sizeof(int), games[game_id]->game->player1.fd);
-                    send_payload(user_request, &clients[i].user_id, sizeof(int), games[game_id]->game->player2.fd);
-                    printf("Client %d wants to watch game %d\n", clients[i].user_id, game_id);
+                    //CallType user_request = USER_WANTS_TO_WATCH;
+                    //send_payload(user_request, &clients[i].user_id, sizeof(int), games[game_id]->game->player1.fd);
+                    //send_payload(user_request, &clients[i].user_id, sizeof(int), games[game_id]->game->player2.fd);
+                    //printf("Client %d wants to watch game %d\n", clients[i].user_id, game_id);
+                    // for now we do not handle multiple watchers or refusals, we just let the client watch directly
+                    // so we need to store it in the game instance
+                    games[game_id]->watchers_user_id[games[game_id]->num_watchers] = clients[i].user_id;
+                    games[game_id]->watchers_fd[games[game_id]->num_watchers] = clients[i].fd;
+                    games[game_id]->num_watchers++;
                     break;
                 }
                 case SEND_LOBBY_CHAT: {

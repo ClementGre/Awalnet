@@ -22,6 +22,7 @@ void send_game_chat(const char* message);
 void send_does_user_exist(int user_id);
 void send_game_watch_request(int game_id);
 void send_game_watch_answer(int watcher_user_id, int answer);
+void send_user_wants_to_exit_watch(int game_id);
 
 // Process incoming network messages (returns 1 if processed, 0 if none available)
 int process_network_messages(void);

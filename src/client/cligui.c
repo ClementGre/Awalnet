@@ -41,6 +41,10 @@ typedef struct UIState {
     int players_in_game_refused_me_to_watch;
     int player_accepted_me_to_watch;
     int allow_anybody_to_watch;
+    int moves_played;
+    Game *game_watch;
+    Player player1;
+    Player player2;
 
     // Game state
     int in_game;
@@ -530,6 +534,97 @@ void on_your_turn(int move_played) {
     ui_state.last_move = move_played;
 }
 
+void on_move_received(int move_played) {
+    /* Si le serveur indique qu'aucun coup n'a encore été joué */
+    if (move_played == -1) {
+        if (!ui_state.game_watch) {
+            ui_state.player1 = newPlayer(-1, -1);
+            ui_state.player2 = newPlayer(-1, -1);
+            ui_state.game_watch = newGame(&ui_state.player1, &ui_state.player2);
+            ui_state.moves_played = 0;
+            printf("\n>>> Suivi de la partie : démarrage du visionnage (en attente du premier coup).\n");
+        } else {
+            printf(">>> Aucun coup joué pour le moment.\n");
+        }
+        printGame(ui_state.game_watch, 1);
+        fflush(stdout);
+        return;
+    }
+
+    /* Valider la valeur reçue (doit être 1..6) */
+    if (move_played < 1 || move_played > 6) {
+        printf(">>> Move reçu invalide: %d (ignoré)\n", move_played);
+        fflush(stdout);
+        return;
+    }
+
+    /* Initialiser l'état de visionnage si nécessaire */
+    if (!ui_state.game_watch) {
+        ui_state.player1 = newPlayer(-1, -1);
+        ui_state.player2 = newPlayer(-1, -1);
+        ui_state.game_watch = newGame(&ui_state.player1, &ui_state.player2);
+        ui_state.moves_played = 0;
+        printf("\n>>> Suivi de la partie : démarrage du visionnage.\n");
+    }
+
+    /* Déterminer quel joueur joue pour ce message sans incrémenter encore */
+    int tentative_moves = ui_state.moves_played + 1;
+    int current_player = (tentative_moves % 2 == 1) ? 1 : 2;
+
+    /* Adapter la position pour l'index du board : joueur1 -> 0..5, joueur2 -> 6..11 */
+    int adjusted_position = (current_player == 1) ? (move_played - 1) : (move_played + 5);
+
+    /* Vérifications de sécurité */
+    if (adjusted_position < 0 || adjusted_position >= 12) {
+        printf(">>> Coup hors bornes après ajustement (%d). Ignoré.\n", adjusted_position);
+        fflush(stdout);
+        return;
+    }
+
+    if (ui_state.game_watch->board[adjusted_position] == 0) {
+        /* Coup illégal (case vide) : on l'ignore sans incrémenter pour éviter boucles */
+        printf(">>> Coup illégal : case %d vide. Ignoré.\n", move_played);
+        fflush(stdout);
+        return;
+    }
+
+    /* Appliquer le coup (valide) */
+    ui_state.moves_played++;
+    printf("\n>>> Coup reçu (viewer) : joueur %d a joué la position %d\n", current_player, move_played);
+
+    int position_of_last_put_seed = moveSeeds(ui_state.game_watch, adjusted_position);
+    int new_points = collectSeedsAndCountPoints(ui_state.game_watch, position_of_last_put_seed, current_player);
+
+    if (current_player == 1) ui_state.player1.score += new_points;
+    else ui_state.player2.score += new_points;
+
+    /* Afficher l'état mis à jour */
+    printGame(ui_state.game_watch, 1);
+    printf("    SCORE (viewer) : p1 : %d | p2 : %d\n", ui_state.player1.score, ui_state.player2.score);
+    fflush(stdout);
+}
+
+void on_game_over_watcher(GAME_OVER_REASON reason) {
+    printf("\n>>> Le serveur a notifié que la partie que vous regardez est terminée.\n");
+    ui_state.moves_played = 0;
+    if (ui_state.game_watch) {
+        free(ui_state.game_watch);
+        ui_state.game_watch = NULL;
+    }
+    // afficher la raison de la fin de la partie
+    // receives results relative to player 1
+    if (reason == WIN) {
+        printf(">>> La partie s'est terminée par la victoire du premier joueur.\n");
+    } else if (reason == LOSE) {
+        printf(">>> La partie s'est terminée par la victoire du second joueur.\n");
+    } else if (reason == DRAW) {
+        printf(">>> La partie s'est terminée par un match nul.\n");
+    } else if (reason == OPPONENT_DISCONNECTED) {
+        printf(">>> La partie s'est terminée car un joueur s'est déconnecté.\n");
+    }
+    ui_state.id_send_game_watch_request = 0;
+}
+
 void on_game_over(GAME_OVER_REASON reason) {
     printf("\n>>> Le serveur a notifié que la partie est terminée.\n");
     ui_state.game_over_reason = reason;
@@ -624,6 +719,9 @@ void run_client_ui(void) {
         printf(" 9 - Envoyer un message au lobby\n");
         printf(" 10 - Modifier les droits de visionnage\n");
         printf(" 11 - Quitter\n");
+        if (ui_state.game_watch) {
+            printf("    (En ce moment, vous regardez une partie en cours... tapez 12 pour arrêter)\n");
+        }
         printf("Votre choix: ");
         fflush(stdout);
 
@@ -638,6 +736,18 @@ void run_client_ui(void) {
 
         if (sscanf(input_buf, "%d", &choice) != 1) {
             printf("Entrée invalide.\n");
+            continue;
+        }
+
+        if (choice == 12 && ui_state.game_watch) {
+            // Stop watching game
+            free(ui_state.game_watch);
+            ui_state.game_watch = NULL;
+            ui_state.moves_played = 0;
+            printf("Vous avez arrêté de regarder la partie en cours.\n");
+            // envoyer un message au serveur pour arrêter de regarder
+            send_user_wants_to_exit_watch(ui_state.id_send_game_watch_request - 1);
+            ui_state.id_send_game_watch_request = 0;
             continue;
         }
 

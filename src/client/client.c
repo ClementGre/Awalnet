@@ -190,7 +190,14 @@ int process_network_messages(void) {
         int answer = incoming_payload[0] + (incoming_payload[1] << 8) + (incoming_payload[2] << 16) + (incoming_payload[3] << 24);
         on_watch_game_answer(answer);
 
-    } else if (incoming_call_type == LIST_USERS) {
+    } else if (incoming_call_type == GAME_OVER_WATCHER){
+        // the server notifies that the game is over for the watcher
+        GAME_OVER_REASON reason = (GAME_OVER_REASON) (incoming_payload[0] + (incoming_payload[1] << 8) + (incoming_payload[2] << 16) + (
+                                                          incoming_payload[3] << 24));
+        on_game_over_watcher(reason);
+    }
+
+    else if (incoming_call_type == LIST_USERS) {
         // receiving the list of online users
         char user_list_buffer[1024] = {0};
         memcpy(user_list_buffer, incoming_payload, 1024);
@@ -228,6 +235,10 @@ int process_network_messages(void) {
         GAME_OVER_REASON reason = (GAME_OVER_REASON) (incoming_payload[0] + (incoming_payload[1] << 8) + (incoming_payload[2] << 16) + (
                                                           incoming_payload[3] << 24));
         on_game_over(reason);
+
+    } else if (incoming_call_type == PLAY_MADE_WATCHER) {
+        int move_played = incoming_payload[0] + (incoming_payload[1] << 8) + (incoming_payload[2] << 16) + (incoming_payload[3] << 24);
+        on_move_received(move_played);
 
     } else if (incoming_call_type == RECEIVE_LOBBY_CHAT) {
         // receiving a lobby chat message
@@ -371,5 +382,11 @@ void send_game_watch_answer(int watcher_user_id, int answer){
     if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send ct");
     if (send(client_fd, &watcher_user_id, sizeof(int), 0) <= 0) perror("send watcher_user_id");
     if (send(client_fd, &answer, sizeof(int), 0) <= 0) perror("send answer");
+}
+
+void send_user_wants_to_exit_watch(int game_id) {
+    CallType ct = USER_WANTS_TO_EXIT_WATCH;
+    if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send ct");
+    if (send(client_fd, &game_id, sizeof(int), 0) <= 0) perror("send game_id");
 }
 
