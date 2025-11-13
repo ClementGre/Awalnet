@@ -40,6 +40,7 @@ typedef struct UIState {
     int id_send_game_watch_request;
     int players_in_game_refused_me_to_watch;
     int player_accepted_me_to_watch;
+    int allow_anybody_to_watch;
 
     // Game state
     int in_game;
@@ -521,6 +522,14 @@ void on_user_wants_to_watch(int user_id) {
     printf("\n>>> L'utilisateur %d souhaite regarder votre partie en cours.\n", user_id);
     // we check if user_id is one of our friends
     int is_friend = 0;
+    if (ui_state.allow_anybody_to_watch){
+        // if we allow anybody to watch, we accept directly
+        printf("Vous autorisez %d à regarder votre partie en cours (vous avez autorisé tout le monde).\n", user_id);
+        is_friend = 1;
+        send_game_watch_answer(user_id, is_friend);
+        return;
+
+    }
     for (int i = 0; i < ui_state.nb_friends; i++)
     {
         if (ui_state.friends[i].user_id == user_id) {
@@ -530,7 +539,6 @@ void on_user_wants_to_watch(int user_id) {
     }
     if (is_friend) {
         printf("Vous autorisez %d à regarder votre partie en cours (c'est un de vos amis).\n", user_id);
-        send_game_watch_request(ui_state.id_send_game_watch_request);
     } else {
         printf("Vous n'autorisez pas %d à regarder votre partie en cours (ce n'est pas un de vos amis).\n", user_id);
     }
@@ -613,7 +621,8 @@ void run_client_ui(void) {
         printf(" 7 - Définir ma bio\n");
         printf(" 8 - Regarder une partie en cours\n");
         printf(" 9 - Envoyer un message au lobby\n");
-        printf(" 10 - Quitter\n");
+        printf(" 10 - Modifier les droits de visionnage\n");
+        printf(" 11 - Quitter\n");
         printf("Votre choix: ");
         fflush(stdout);
 
@@ -799,6 +808,38 @@ void run_client_ui(void) {
                 break;
 
             case 10:
+                if (ui_state.allow_anybody_to_watch) {
+                    printf("Vous avez actuellement autorisé tout le monde à regarder vos parties en cours.\n");
+                    printf("Voulez-vous restreindre les droits de visionnage à vos amis uniquement ? (1 = Oui / 0 = Non) : ");
+                    fflush(stdout);
+                    int restrict_choice;
+                    ret = read_line_interruptible(input_buf, sizeof(input_buf));
+                    if (ret == 0) break; // Interrupted
+                    if (ret < 0 || sscanf(input_buf, "%d", &restrict_choice) != 1) {
+                        printf("Entrée invalide.\n");
+                        break;
+                    }
+                    if (restrict_choice == 1) {
+                        ui_state.allow_anybody_to_watch = 0;
+                        printf("Vous avez restreint les droits de visionnage à vos amis uniquement.\n");
+                    }
+                } else {
+                    printf("Vous avez actuellement restreint les droits de visionnage à vos amis uniquement.\n");
+                    printf("Voulez-vous autoriser tout le monde à regarder vos parties en cours ? (1 = Oui / 0 = Non) : ");
+                    fflush(stdout);
+                    int allow_choice;
+                    ret = read_line_interruptible(input_buf, sizeof(input_buf));
+                    if (ret == 0) break; // Interrupted
+                    if (ret < 0 || sscanf(input_buf, "%d", &allow_choice) != 1) {
+                        printf("Entrée invalide.\n");
+                        break;
+                    }
+                    if (allow_choice == 1) {
+                        ui_state.allow_anybody_to_watch = 1;
+                        printf("Vous avez autorisé tout le monde à regarder vos parties en cours.\n");
+                    }
+                }
+            case 11:
                 printf("Déconnecté.\n");
                 exit(EXIT_SUCCESS);
 
