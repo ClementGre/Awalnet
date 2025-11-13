@@ -119,6 +119,7 @@ static int read_line_interruptible_with_prompt(char *buffer, size_t size, const 
 
         // Check if network event occurred
         if (FD_ISSET(notification_fd, &readfds)) {
+            return 0;
             // Process all pending messages
             while (process_network_messages()) {}
 
