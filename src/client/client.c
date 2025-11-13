@@ -186,6 +186,14 @@ int process_network_messages(void) {
         // confirmation of a successful previous call
         on_success();
 
+    } else if (incoming_call_type == USER_WANTS_TO_WATCH) {
+        int user_id = incoming_payload[0] + (incoming_payload[1] << 8) + (incoming_payload[2] << 16) + (incoming_payload[3] << 24);
+        on_user_wants_to_watch(user_id);
+
+    } else if (incoming_call_type == WATCH_GAME_ANSWER){
+        int answer = incoming_payload[0] + (incoming_payload[1] << 8) + (incoming_payload[2] << 16) + (incoming_payload[3] << 24);
+        on_watch_game_answer(answer);
+
     } else if (incoming_call_type == LIST_USERS) {
         // receiving the list of online users
         char user_list_buffer[1024] = {0};
@@ -351,3 +359,18 @@ void send_does_user_exist(int user_id) {
     if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send ct");
     if (send(client_fd, &user_id, sizeof(int), 0) <= 0) perror("send response");
 }
+
+void send_game_watch_request(int game_id) {
+    CallType ct = WATCH_GAME;
+    if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send ct");
+    if (send(client_fd, &game_id, sizeof(int), 0) <= 0) perror("send game_id");
+    printf("Votre demande pour regarder la partie %d a été envoyée au serveur.\n", game_id);
+}
+
+void send_game_watch_answer(int watcher_user_id, int answer){
+    CallType ct = ALLOW_WATCHER;
+    if (send(client_fd, &ct, sizeof(ct), 0) <= 0) perror("send ct");
+    if (send(client_fd, &watcher_user_id, sizeof(int), 0) <= 0) perror("send watcher_user_id");
+    if (send(client_fd, &answer, sizeof(int), 0) <= 0) perror("send answer");
+}
+

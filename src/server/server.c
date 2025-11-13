@@ -93,6 +93,9 @@ typedef struct {
     int game_id;
     pthread_t thread;
     pthread_mutex_t mutex;
+    int *watchers_fd;
+    int *watchers_user_id;
+    int num_watchers;
 } GameInstance;
 
 static GameInstance *games[MAX_GAMES] = {0};
@@ -105,6 +108,9 @@ GameInstance *alloc_game(void) {
             g->game_id = next_game_id++;
             pthread_mutex_init(&g->mutex, NULL);
             g->running = 1;
+            g->watchers_fd = malloc((MAX_CLIENTS - 2) * sizeof(int)); // max watchers is total clients minus 2 players
+            g->watchers_user_id = malloc((MAX_CLIENTS - 2) * sizeof(int)); // max watchers is total clients minus 2 players
+            g->num_watchers = 0;
             games[i] = g;
             return g;
         }
@@ -247,6 +253,51 @@ void *game_thread(void *arg) {
                 break;
             }
         }
+
+        if  (incoming == ALLOW_WATCHER) {
+                int watcher_user_id;
+                if (recv(current_player.fd, &watcher_user_id, sizeof (int), 0) <= 0) {
+                    perror("allow watcher autorisation");
+                    break;
+                }
+                // then fetch watcher fd
+                int watcher_fd = -1;
+                for (int j = 0; j < MAX_CLIENTS; j++) {
+                    if (clients[j].active && clients[j].user_id == watcher_user_id && !clients[j].in_game) {
+                        watcher_fd = clients[j].fd;
+                        break;
+                    }
+                }
+                if (watcher_fd == -1) {
+                    printf("Watcher %d not found or is in game\n", watcher_user_id);
+                    break;
+                }
+                // we need to find the game of the player who answered
+
+                // then checks if he accepted or had previously been accepted by the other player
+                for (int i = 0; i< g->num_watchers; i++) {
+                    if (g->watchers_fd[i] == watcher_user_id) {
+                        printf("Watcher %d was already accepted to watch game %d\n", watcher_user_id, g->game_id);
+                        break;
+                    }
+                }
+                // then sends him the answer
+                int answer;
+                if (recv(current_player.fd, &answer, sizeof (int), 0) <= 0) {
+                    perror("recv watcher answer");
+                    break;
+                }
+                printf("Game %d player fd %d answered %d to watcher %d\n", g->game_id, current_player.fd, answer, watcher_user_id);
+                CallType out = WATCH_GAME_ANSWER;
+                // we send him the answer
+                send_payload(out, &answer, sizeof(int), watcher_fd);
+                continue;
+
+            }
+
+
+
+
         else {
             // Unexpected message: ignore or log
             printf("Game %d received unexpected pack from fd %d: %d\n", g->game_id, current_player.fd, incoming);
@@ -853,10 +904,23 @@ int start_server(void) {
                     if (recv(clients[i].fd, &game_id, sizeof (int), 0) <= 0) {
                         close(clients[i].fd);
                         clients[i].active = 0;
+                        break;
                     }
-                    printf("Client %d wants to watch game %d\n", clients[i].user_id, game_id);
+                    // because games are displayed to users starting from 1
+                    game_id--;
+                    // first we need to check if the game exists
+                    if (game_id < 0 || game_id >= next_game_id || games[game_id] == NULL) {
+                        printf("Client %d requested to watch non-existing game %d\n", clients[i].user_id, game_id);
+                        CallType error = ERROR;
+                        char error_msg[] = "The requested game does not exist.";
+                        send_error(call_type, error_msg, clients[i].fd);
+                        break;
+                    }
                     // then fetch players in the game and asks them to allow or not
-                    //send(clients[i].fd, &out, sizeof(out), 0);
+                    CallType user_request = USER_WANTS_TO_WATCH;
+                    send_payload(user_request, &clients[i].user_id, sizeof(int), games[game_id]->game->player1.fd);
+                    send_payload(user_request, &clients[i].user_id, sizeof(int), games[game_id]->game->player2.fd);
+                    printf("Client %d wants to watch game %d\n", clients[i].user_id, game_id);
                     break;
                 }
                 case SEND_LOBBY_CHAT: {

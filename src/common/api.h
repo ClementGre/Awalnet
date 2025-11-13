@@ -36,7 +36,11 @@ typedef enum CallType {
     SEND_GAME_CHAT = 19, // Send chat message to opponent in game
     RECEIVE_LOBBY_CHAT = 20, // Receive lobby chat message (sender_id + username + message)
     RECEIVE_GAME_CHAT = 21, // Receive game chat message (sender_id + username + message)
-    DOES_USER_EXIST = 22 // Server response to DOES_USER_EXIST to inform whether or not the user exists
+    DOES_USER_EXIST = 22, // Server response to DOES_USER_EXIST to inform whether or not the user exists
+    USER_WANTS_TO_WATCH = 23, // Notify both players that a user wants to watch their game
+    ALLOW_WATCHER = 24, // Notify the watcher that he is allowed (or not) to watch the game
+    WATCH_GAME_ANSWER = 25 // Answer to WATCH_GAME to inform wether or not we accept the watch request
+
 } CallType;
 
 // Returns the size of a CallType payload, excluding the CallType itself.

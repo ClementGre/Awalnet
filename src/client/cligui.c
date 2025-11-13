@@ -37,6 +37,9 @@ typedef struct UIState {
     int challenger_id;
     char challenger_username[USERNAME_SIZE + 1];
     int sent_challenges;
+    int id_send_game_watch_request;
+    int players_in_game_refused_me_to_watch;
+    int player_accepted_me_to_watch;
 
     // Game state
     int in_game;
@@ -438,6 +441,8 @@ void on_error(int previous_call, char error_msg[256]) {
             ui_state.waiting_for_user_id = 0;
             ui_state.does_user_exist = 0;
             break;
+        case WATCH_GAME :
+            ui_state.id_send_game_watch_request = 0;
         default:
             break;
     }
@@ -510,6 +515,39 @@ void on_receive_lobby_chat(int sender_id, char sender_username[USERNAME_SIZE + 1
 void on_receive_game_chat(int sender_id, char sender_username[USERNAME_SIZE + 1], char message[MAX_CHAT_MESSAGE_SIZE]) {
     printf("\n[GAME] %s: %s\n", sender_username, message);
     fflush(stdout);
+}
+
+void on_user_wants_to_watch(int user_id) {
+    printf("\n>>> L'utilisateur %d souhaite regarder votre partie en cours.\n", user_id);
+    // we check if user_id is one of our friends
+    int is_friend = 0;
+    for (int i = 0; i < ui_state.nb_friends; i++)
+    {
+        if (ui_state.friends[i].user_id == user_id) {
+            is_friend = 1;
+            break;
+        }
+    }
+    if (is_friend) {
+        printf("Vous autorisez %d à regarder votre partie en cours (c'est un de vos amis).\n", user_id);
+        send_game_watch_request(ui_state.id_send_game_watch_request);
+    } else {
+        printf("Vous n'autorisez pas %d à regarder votre partie en cours (ce n'est pas un de vos amis).\n", user_id);
+    }
+    send_game_watch_answer(user_id, is_friend);
+
+}
+
+void on_watch_game_answer(int answer) {
+    if (answer == 1) {
+        printf("\n>>> Votre demande pour regarder la partie a été acceptée par le joueur.\n");
+        ui_state.player_accepted_me_to_watch++;
+    } else {
+        ui_state.players_in_game_refused_me_to_watch++;
+        if (ui_state.players_in_game_refused_me_to_watch == 2) {
+            printf("\n>>> Votre demande pour regarder la partie a été refusée par le joueur.\n");
+        }
+    }
 }
 
 void run_client_ui(void) {
@@ -728,6 +766,10 @@ void run_client_ui(void) {
                 pthread_mutex_unlock(&user_lock);
                 break;
             case 8:
+                if (ui_state.id_send_game_watch_request) {
+                    printf("Vous avez déjà envoyé une demande, veuillez attendre la réponse avant d'en faire de nouvelles\n");
+                    break;
+                }
                 int game_id;
                 printf("Entrer l'id de la game: ");
                 fflush(stdout);
@@ -738,7 +780,8 @@ void run_client_ui(void) {
                     break;
                 }
                 // then send the ID of the game to the server
-
+                send_game_watch_request(game_id);
+                ui_state.id_send_game_watch_request = game_id + 1; // just to mark that we sent a request and avoid game_id = 0 being ambiguous
                 break;
             case 9:
                 printf("Entrez votre message: ");
