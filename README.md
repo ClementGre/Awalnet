@@ -185,7 +185,11 @@ When a player challenges another player, if he receives a challenge and has not 
 ❌ Free to your imagination, player rankings (Wikipedia article on Elo rating), tournament organization, adapting it to another game, etc.
 
 
-# AI USED :
-github copilot - chatGPT 5
+# LLM used
+- Github Copilot for in-ide smart autocompletion.
+- Chat GPT 5 chat through Github Copilot for debugging and help on complex topics (C programming, algorithmic concerns, and architecture)
+- Mistral Medium for initial code structure generation (with select() between different file descriptors to handle concurrency).
+- Mistral Medium for explanations about the working of the client-server architecture in C.
+- Claude Sonnet 4.5 agent through Kilo Code for fast refactoring (split of a huge client.c file into two smaller ones (client.c and cligui.c), homogenization of the UI prints and prompts).
 
 
