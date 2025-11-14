@@ -24,7 +24,7 @@ int main(void) {
 
 
     // Initialize client connection
-    client_init("127.0.0.1", PORT);
+    client_init("192.168.159.217", PORT);
 
     // Run the main UI loop (blocks until exit)
     run_client_ui();

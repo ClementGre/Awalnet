@@ -15,6 +15,101 @@
 #define MAX_GAMES 20
 
 
+//#########   RANKINGG ##############
+typedef struct {
+    int id;
+    int wins;
+} PlayerRanking;
+
+typedef struct {
+    Player *data;
+    int size;
+    int capacity;
+} MaxHeap;
+
+MaxHeap *create_heap(int capacity) {
+    MaxHeap *h = malloc(sizeof(MaxHeap));
+    h->data = malloc(capacity * sizeof(Player));
+    h->size = 0;
+    h->capacity = capacity;
+    return h;
+}
+
+void swap(PlayerRanking *a, PlayerRanking *b) {
+    PlayerRanking tmp = *a;
+    *a = *b;
+    *b = tmp;
+}
+
+void heapify_up(MaxHeap *h, int i) {
+    while (i > 0) {
+        int parent = (i - 1) / 2;
+        if (h->data[i].wins <= h->data[parent].wins) break;
+        swap(&h->data[i], &h->data[parent]);
+        i = parent;
+    }
+}
+
+void heapify_down(MaxHeap *h, int i) {
+    while (1) {
+        int left = i * 2 + 1;
+        int right = i * 2 + 2;
+        int largest = i;
+
+        if (left < h->size && h->data[left].wins > h->data[largest].wins)
+            largest = left;
+        if (right < h->size && h->data[right].wins > h->data[largest].wins)
+            largest = right;
+
+        if (largest == i) break;
+
+        swap(&h->data[i], &h->data[largest]);
+        i = largest;
+    }
+}
+
+void heap_insert(MaxHeap *h, PlayerRanking p) {
+    if (h->size == h->capacity) return;
+    h->data[h->size] = p;
+    heapify_up(h, h->size);
+    h->size++;
+}
+
+void heap_update_wins(MaxHeap *h, int player_id) {
+    for (int i = 0; i < h->size; i++) {
+        if (h->data[i].id == player_id) {
+            h->data[i].wins++;
+            heapify_up(h, i);
+            heapify_down(h, i);
+            return;
+        }
+    }
+}
+
+Player heap_extract_max(MaxHeap *h) {
+    Player max = h->data[0];
+    h->data[0] = h->data[h->size - 1];
+    h->size--;
+    heapify_down(h, 0);
+    return max;
+}
+
+char *print_ranking(MaxHeap *h) {
+    int rank = 1;
+    char buffer[1024] = {0};
+    while (h->size > 0) {
+        Player p = heap_extract_max(h);
+        char line[64];
+        line = snprintf(line, sizeof(line), "%der - joueur id %d - victoires : %d\n", rank, p.id, p.wins);
+        // we add the line to the buffer
+        strcat(buffer, line);
+        rank++;
+    }
+    return strdup(buffer);
+}
+
+//##################
+
 typedef struct {
     int fd;
     int user_id;
@@ -129,6 +224,9 @@ void free_game(GameInstance *g) {
     free(g);
 }
 
+
+// ranking heap
+MaxHeap *h = NULL;
 
 void *game_thread(void *arg) {
     GameInstance *g = arg;
@@ -337,6 +435,7 @@ void *game_thread(void *arg) {
             send(g->game->player1.fd, &win, sizeof(win), 0);
             send(g->game->player2.fd, &go, sizeof(go), 0);
             send(g->game->player2.fd, &lose, sizeof(lose), 0);*/
+            heap_update_wins(h, g->game->player1.user_id);
 
             int idx1 = find_client_index_by_fd(g->game->player1.fd);
             int idx2 = find_client_index_by_fd(g->game->player2.fd);
@@ -363,6 +462,9 @@ void *game_thread(void *arg) {
             GAME_OVER_REASON lose = LOSE;
             send_payload(go, &lose, sizeof(lose), g->game->player1.fd);
             send_payload(go, &win, sizeof(win), g->game->player2.fd);
+
+            heap_update_wins(h, g->game->player2.user_id);
+
 
             // also notify watchers
             for (int w = 0; w < g->num_watchers; ++w) {
@@ -505,6 +607,7 @@ int start_server(void) {
             }
         }
 
+        h = create_heap(100); // create a heap with capacity 100 for ranking
         // Données clients
         for (int i = 0; i < MAX_CLIENTS; i++) {
             if (!clients[i].active) continue;
@@ -532,6 +635,7 @@ int start_server(void) {
                     printf("New user connected: %s (%d) - socket %d\n", username, user.id, clients[i].fd);
                     clients[i].user_id = user.id;
                     strncpy(clients[i].username, username, USERNAME_SIZE);
+                    heap_insert(h, (PlayerRanking ){clients[i].user_id, 0});
 
                     uint8_t user_buffer[1024] = {0};
                     serialize_User(&user, user_buffer);
@@ -895,6 +999,7 @@ int start_server(void) {
 
                     break;
                 }
+
                 case DOES_USER_EXIST: {
                     CallType out = DOES_USER_EXIST;
                     int requested_user_id = 0;

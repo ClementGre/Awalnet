@@ -14,9 +14,14 @@ To clean build artifacts:
 make clean
 ```
 
-To build and run:
+To build and run server :
 ```bash
-make && ./bin/awalnet
+make && ./bin/awalnet_server
+```
+
+To build and run client :
+```bash
+make && ./bin/awalnet_client
 ```
 
 ## Project Structure
@@ -26,6 +31,18 @@ make && ./bin/awalnet
 - `bin/obj/` - Object files (.o)
 - `Makefile` - Build configuration
 
+# Menu documentation 
+
+- Voir votre profil - Affiche votre profil utilisateur (username, bio, games played, game won)
+- Lister les utilisateurs connectés - Affiche la liste des utilisateurs connectés (username + id)
+- Défier un utilisateur - Demande à un utilisateur connecté de jouer une partie avec vous
+- Consulter le profil d'un utilisateur - Affiche le profil d'un utilisateur connecté (username, bio, games played, game won)
+- Voir les parties en cours - Affiche la liste des parties en cours (id des games et scores)
+- Gérer mes amis - Ajouter/Supprimer un utilisateur à sa liste d'amis en entrant son id
+- Définir ma bio - Permet de définir ou modifier sa bio (10 lignes ASCII max)
+- Regarder une partie en cours - Permet de regarder une partie en cours entre deux autres utilisateurs en renseignant l'id de la partie
+- Envoyer un message dans le chat du lobby - Permet d'envoyer un message à tous les utilisateurs connectés et non en game
+- Quitter - Se déconnecte du serveur et ferme le client
 ## Processes
 
 
@@ -81,10 +98,48 @@ When a player challenges another player, if he receives a challenge afterward, w
 ### GAME MODE - GAME LOOP
 ```mermaid
 sequenceDiagram
-    Player1->>Server: SEND_MOVE (move data)
-    Server->>Player2: RECEIVE_MOVE (move data)
-    Player2->>Server: SEND_MOVE (move data)
-    Server->>Player1: RECEIVE_MOVE (move data)
+    Player1->>Server: PLAY_MADE (move data)
+    Server->>Player2: YOUR_TURN (move data)
+    Server->>Watchers: PLAY_MADE_WATCHER (move data)
+    Player2->>Server: PLAY_MADE (move data)
+    Server->>Player1: YOUR_TURN (move data)
+    Server->>Watchers: PLAY_MADE_WATCHER (move data)
+
+```
+
+### WATCH MODE 
+```mermaid
+sequenceDiagram
+    Watcher->>Server: WATCH_GAME (game id)
+    Server->>Player1: USER_WANTS_TO_WATCH (watcher id)
+    Server->>Player1: USER_WANTS_TO_WATCH (watcher id)
+    Player1->>Server: ALLOW_CLIENT_TO_WATCH (watcher id)
+    Player2->>Server: ALLOW_CLIENT_TO_WATCH (watcher id)
+    Server->>Watcher: ALLOW_WATCHER (answer)
+```
+
+A watcher cannot watch multiple games at the same time. This rule is applied on the client side.
+A watcher can choose to stop watching a game at any time by sending a USER_WANTS_TO_EXIT_WATCH request to the server.
+
+### CHAT MESSAGES LOBBY
+```mermaid
+sequenceDiagram
+    ClientA->>Server: SEND_LOBBY_CHAT (message)
+    Server->>ClientB: RECEIVE_LOBBY_CHAT (source id & username + message)
+``` 
+
+### CHAT MESSAGES IN-GAME
+```mermaid
+sequenceDiagram
+    Player1->>Server: SEND_GAME_CHAT (message)
+    Server->>Player2: RECEIVE_GAME_CHAT (source id & username + message)
+```
+
+### ADD FRIEND
+```mermaid
+sequenceDiagram
+    ClientA->>Server: DOES_USER_EXIST (target id)
+    Server->>ClientA: DOES_USER_EXIST (answer)
 ```
 
 ## NOTES
@@ -128,3 +183,9 @@ When a player challenges another player, if he receives a challenge and has not 
 ❌ Add the ability to save played games so they can be reviewed later.
 
 ❌ Free to your imagination, player rankings (Wikipedia article on Elo rating), tournament organization, adapting it to another game, etc.
+
+
+# AI USED :
+github copilot - chatGPT 5
+
+

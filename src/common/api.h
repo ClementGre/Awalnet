@@ -42,7 +42,8 @@ typedef enum CallType {
     WATCH_GAME_ANSWER = 25, // Answer to WATCH_GAME to inform wether or not we accept the watch request
     PLAY_MADE_WATCHER = 26, // Sends to the watchers the play made
     USER_WANTS_TO_EXIT_WATCH = 27, // Notify server that the watcher wants to stop watching the game
-    GAME_OVER_WATCHER = 28 // Notify the watchers that the game is over
+    GAME_OVER_WATCHER = 28, // Notify the watchers that the game is over
+    CONSULT_RANKING = 29, // Request the ranking from the server
 
 
 } CallType;
